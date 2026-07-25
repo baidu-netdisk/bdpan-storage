@@ -27,8 +27,30 @@ if ! output="$(
 fi
 
 printf '%s\n' "$output" | grep -Fq "https://openapi.baidu.com/oauth/test"
-grep -Fq "get:login --get-auth-url --accept-disclaimer" "$TEST_LOG"
-grep -Fq "set:login --set-code-stdin --accept-disclaimer" "$TEST_LOG"
+grep -Fxq "get:login --get-auth-url --accept-disclaimer" "$TEST_LOG"
+grep -Fxq "set:login --set-code-stdin --accept-disclaimer" "$TEST_LOG"
 test -f "$TEST_STATE"
 
-echo "PASS: both login subcommands accept the disclaimer without exposing the authorization code"
+if printf '%s\n' "$output" | grep -Fq "$auth_code" ||
+    grep -Fq "$auth_code" "$TEST_LOG"; then
+    echo "FAIL: authorization code was exposed in output or command arguments" >&2
+    exit 1
+fi
+
+rm -f "$TEST_STATE"
+: > "$TEST_LOG"
+invalid_code="${auth_code}x"
+if invalid_output="$(
+    printf 'y%s\n' "$invalid_code" |
+        PATH="$test_root/bin:$PATH" bash "$login_script" 2>&1
+)"; then
+    echo "FAIL: malformed authorization code was accepted" >&2
+    exit 1
+fi
+if printf '%s\n' "$invalid_output" | grep -Fq "$invalid_code" ||
+    grep -Fq "$invalid_code" "$TEST_LOG"; then
+    echo "FAIL: malformed authorization code was exposed in output or command arguments" >&2
+    exit 1
+fi
+
+echo "PASS: login commands accept the disclaimer and authorization codes stay secret"

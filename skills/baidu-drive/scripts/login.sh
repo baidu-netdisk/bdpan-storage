@@ -156,7 +156,8 @@ echo ""
 
 # 提示用户输入授权码
 echo -n "请输入浏览器中显示的授权码 (32 位十六进制字符): "
-read -r AUTH_CODE
+read -r -s AUTH_CODE
+echo
 
 if [ -z "$AUTH_CODE" ]; then
     log_error "授权码不能为空"
@@ -166,7 +167,6 @@ fi
 # 校验授权码格式：32 位十六进制字符
 if ! echo "$AUTH_CODE" | grep -qE '^[a-fA-F0-9]{32}$'; then
     log_error "授权码格式不正确（应为 32 位十六进制字符，如: ca0ee3070f75d0246357e5c74d525bda）"
-    log_error "当前输入: ${AUTH_CODE}"
     log_error "请确认您复制的是完整的授权码"
     exit 1
 fi

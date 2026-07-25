@@ -20,7 +20,7 @@ case "${1:-}" in
                 ;;
             --get-auth-url)
                 echo "get:$*" >> "$TEST_LOG"
-                if [[ " $* " != *" --accept-disclaimer "* ]]; then
+                if [ "$#" -ne 3 ] || [ "${3:-}" != "--accept-disclaimer" ]; then
                     echo "Error: 首次使用请添加 --accept-disclaimer 参数" >&2
                     exit 1
                 fi
@@ -28,7 +28,7 @@ case "${1:-}" in
                 ;;
             --set-code-stdin)
                 echo "set:$*" >> "$TEST_LOG"
-                if [[ " $* " != *" --accept-disclaimer "* ]]; then
+                if [ "$#" -ne 3 ] || [ "${3:-}" != "--accept-disclaimer" ]; then
                     echo "Error: 首次使用请添加 --accept-disclaimer 参数" >&2
                     exit 1
                 fi
