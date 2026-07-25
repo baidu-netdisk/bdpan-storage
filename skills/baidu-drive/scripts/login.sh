@@ -104,7 +104,7 @@ log_info "正在获取授权链接..."
 # 检查是否支持 --get-auth-url 参数
 if bdpan login --help 2>/dev/null | grep -q "get-auth-url"; then
     # 新版本，支持 --get-auth-url
-    AUTH_URL=$(bdpan login --get-auth-url 2>/dev/null || echo "")
+    AUTH_URL=$(bdpan login --get-auth-url --accept-disclaimer 2>/dev/null || echo "")
 
     if [ -z "$AUTH_URL" ]; then
         log_error "获取授权链接失败"
@@ -156,7 +156,8 @@ echo ""
 
 # 提示用户输入授权码
 echo -n "请输入浏览器中显示的授权码 (32 位十六进制字符): "
-read -r AUTH_CODE
+read -r -s AUTH_CODE
+echo
 
 if [ -z "$AUTH_CODE" ]; then
     log_error "授权码不能为空"
@@ -166,7 +167,6 @@ fi
 # 校验授权码格式：32 位十六进制字符
 if ! echo "$AUTH_CODE" | grep -qE '^[a-fA-F0-9]{32}$'; then
     log_error "授权码格式不正确（应为 32 位十六进制字符，如: ca0ee3070f75d0246357e5c74d525bda）"
-    log_error "当前输入: ${AUTH_CODE}"
     log_error "请确认您复制的是完整的授权码"
     exit 1
 fi
@@ -176,7 +176,7 @@ log_info "正在使用授权码完成登录..."
 
 # 通过 stdin 安全传递授权码，避免在 ps / /proc/PID/cmdline 中泄露
 if bdpan login --help 2>/dev/null | grep -q "set-code-stdin"; then
-    echo "$AUTH_CODE" | bdpan login --set-code-stdin
+    echo "$AUTH_CODE" | bdpan login --set-code-stdin --accept-disclaimer
 else
     unset AUTH_CODE
     log_error "当前 bdpan 版本不支持 --set-code-stdin（安全授权码传递）"

@@ -1,0 +1,52 @@
+#!/bin/bash
+
+set -eu
+
+case "${1:-}" in
+    version)
+        echo "bdpan: test"
+        ;;
+    whoami)
+        if [ -f "$TEST_STATE" ]; then
+            echo "认证状态: 已登录"
+        else
+            echo "⚠ 未登录"
+        fi
+        ;;
+    login)
+        case "${2:-}" in
+            --help)
+                echo "login supports --get-auth-url and --set-code-stdin"
+                ;;
+            --get-auth-url)
+                echo "get:$*" >> "$TEST_LOG"
+                if [ "$#" -ne 3 ] || [ "${3:-}" != "--accept-disclaimer" ]; then
+                    echo "Error: 首次使用请添加 --accept-disclaimer 参数" >&2
+                    exit 1
+                fi
+                echo "https://openapi.baidu.com/oauth/test"
+                ;;
+            --set-code-stdin)
+                echo "set:$*" >> "$TEST_LOG"
+                if [ "$#" -ne 3 ] || [ "${3:-}" != "--accept-disclaimer" ]; then
+                    echo "Error: 首次使用请添加 --accept-disclaimer 参数" >&2
+                    exit 1
+                fi
+                read -r code
+                if ! [[ "$code" =~ ^[a-fA-F0-9]{32}$ ]]; then
+                    echo "invalid authorization code" >&2
+                    exit 1
+                fi
+                : > "$TEST_STATE"
+                ;;
+            *)
+                echo "unexpected login arguments: $*" >&2
+                exit 1
+                ;;
+        esac
+        ;;
+    *)
+        echo "unexpected command: $*" >&2
+        exit 1
+        ;;
+esac

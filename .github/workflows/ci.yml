@@ -74,3 +74,6 @@ jobs:
               echo "✅ $skill_name 结构检查通过"
             fi
           done
+
+      - name: Test baidu-drive login flow
+        run: bash tests/test-baidu-drive-login.sh
