@@ -104,7 +104,7 @@ log_info "正在获取授权链接..."
 # 检查是否支持 --get-auth-url 参数
 if bdpan login --help 2>/dev/null | grep -q "get-auth-url"; then
     # 新版本，支持 --get-auth-url
-    AUTH_URL=$(bdpan login --get-auth-url 2>/dev/null || echo "")
+    AUTH_URL=$(bdpan login --get-auth-url --accept-disclaimer 2>/dev/null || echo "")
 
     if [ -z "$AUTH_URL" ]; then
         log_error "获取授权链接失败"
@@ -176,7 +176,7 @@ log_info "正在使用授权码完成登录..."
 
 # 通过 stdin 安全传递授权码，避免在 ps / /proc/PID/cmdline 中泄露
 if bdpan login --help 2>/dev/null | grep -q "set-code-stdin"; then
-    echo "$AUTH_CODE" | bdpan login --set-code-stdin
+    echo "$AUTH_CODE" | bdpan login --set-code-stdin --accept-disclaimer
 else
     unset AUTH_CODE
     log_error "当前 bdpan 版本不支持 --set-code-stdin（安全授权码传递）"
