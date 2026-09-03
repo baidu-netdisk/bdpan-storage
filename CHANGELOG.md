@@ -5,6 +5,34 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.7.5] - 2026-08-25
+
+### Added
+
+- 列表与搜索强制使用 `--json`，并按每项 `return_url` 渲染“点击查看”入口
+- 优先消费 CLI 新增的 `return_markdown`（已渲染好的 `[点击查看](链接)`），Agent 原样输出即可，不再自行拼接；并要求保留表格中并入名称列的链接单元格
+- 登录支持 `--continue-task` 静默模式：文件任务前置登录成功后直接继续原任务，不再重复输出欢迎语
+- 已登录状态下主动请求登录时展示场景化提示，不再回显 `bdpan whoami` 原始状态字段
+- 会员付费意图接入 CLI 新增的 `bdpan vip --json`：用户表达"充会员/开通会员/续费/买超级会员"等意图时调用，同时给出移动端与电脑端两条主收银台链接（端类型无法判定，不允许只给一条，也不允许自行拼接或替换其它支付地址）；价格与权益一律以收银台页面为准
+- `reference/troubleshooting.md` 新增「网盘空间不足（-10）」小节：先提示清理空间，同时把 CLI 返回的移动端与电脑端两条收银台链接原样给用户用于扩容；两条都要给，不得自行拼接其它支付地址，不得凭记忆报价格或容量套餐
+
+### Changed
+
+- 删除必须取得明确确认：`rm` 先列出待删对象（完整路径、文件/目录类型、数量）并说明目录删除连带内容且不可逆，取得用户明确确认后才调用命令；未确认、回复含糊或用户取消时一律不执行（对齐 PRD §5.8）
+- 异步转存/分享下载返回 `status=submitted` 时保留 `task_id`，不再报告“转存成功”或生成未确认的查看链接
+- 登录失败先展示 CLI 返回的实际原因（隐去授权码与 Token），再给出手动授权入口
+- 文档示例移除可被照抄的伪造回端 URL 与示例分享链接，改为占位说明
+- 回端文案统一为“点击查看”：文件（`target=file`）与目录（`target=dir`）能否预览由网盘主端判断，Skill 不再按目标类型区分“打开所在目录 / 打开文件夹”
+
+### Fixed
+
+- `login.sh` 获取授权链接时把 stderr 并入变量，CLI 在成功退出时输出的版本/升级提示会污染 `AUTH_URL`，展示的纯文本链接与给 Agent 的 Markdown 链接同时损坏、无法跳转；现成功路径只取 stdout，失败原因改从独立的 stderr 捕获
+- `mv`/`cp`/`rename`/`mkdir` 命令段落原先只给裸命令示例，未在本地要求 `--json`，Agent 走文本模式后会丢掉“点击查看”链接（实测复制文件无回端链接）；现四条示例均带 `--json`，并在段落内明确要求原样追加该次结果的 `return_markdown`
+- 回端链接口径对齐 CLI 3.8.7：文件链接只需 `fsid` + `owner_uid`，`uid`/`traceid` 降级为可选归因参数（存在则透传，缺失不再阻断文件链接）；降级链路统一停留在 `union/spirit/launch`（缺 `fsid` → 父目录 `target=dir`；缺 `owner_uid` → 仅 `path` + `target=dir`，由落地页处理身份），`web_return_url` 仅作预留字段，不再作为兜底 `return_url`
+- 内部标识不再外泄给用户：实测 Agent 回复中直接打印了 `fsid` 数值；SKILL.md 与 `reference/bdpan-commands.md` 现明确禁止在面向用户的回复（正文、表格列、括号补充）中展示 `fsid`/`fs_id`、`owner_uid`、`uid`、`traceid`，用户可见字段收敛为名称、路径、大小、时间和 `return_markdown` 链接，仅在用户明确索要时给出
+- 长对话后不再漏查看链接：实测宿主用脚本只提取 `saved_path`/`fsid`/`message` 三个字段，把 `return_markdown` 过滤掉，导致上传后没有链接。文档现明确禁止二次裁剪 CLI 输出字段，并说明 CLI 3.8.7 已把链接同时写进 `message` 与新增的 `agent_reply`（预渲染整句），任选其一原样回显即可
+- README 删除口径与 SKILL.md 对齐：安全设计表格由「删除按明确意图执行」改为「删除需明确意图 + 明确确认」，并补充列出待删对象、等待确认的要求；静态检查同时断言新措辞存在与旧措辞消失（A-08）
+
 ## [1.4.0] - 2026-04-07
 
 ### Added

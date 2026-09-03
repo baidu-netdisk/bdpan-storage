@@ -14,7 +14,7 @@ AI: [执行 bdpan upload ./report.pdf report.pdf]
     [执行 bdpan share report.pdf]
 
     上传并分享成功！
-    链接: https://pan.baidu.com/s/1xxxxxxx
+    链接: <百度网盘分享链接>
     提取码: abcd
     有效期: 7 天
 ```
@@ -27,7 +27,7 @@ AI: [执行 bdpan upload ./project/ project/]
     [执行 bdpan share project]
 
     文件夹上传并分享成功！
-    链接: https://pan.baidu.com/s/1xxxxxxx
+    链接: <百度网盘分享链接>
     提取码: efgh
     有效期: 7 天
 ```
@@ -40,7 +40,7 @@ AI: [执行 bdpan upload ./data.tar.gz backup/data.tar.gz]
     [执行 bdpan share backup/data.tar.gz]
 
     上传并分享成功！
-    链接: https://pan.baidu.com/s/1xxxxxxx
+    链接: <百度网盘分享链接>
     提取码: ijkl
     有效期: 7 天
 ```
@@ -77,13 +77,17 @@ AI: [执行 bdpan download backup/ ./backup/]
 
 ```
 用户: 查看我上传了哪些文件
-AI: [执行 bdpan ls]
+AI: [执行 bdpan ls --json]
 
-    类型    大小          修改时间              文件名
-    ------  ------------  --------------------  --------
-    目录     -            2026-02-20 10:30:00  backup
-    文件    1.5 MB        2026-02-25 15:20:00  report.pdf
-    文件    256 KB        2026-02-24 09:15:00  config.yaml
+    # 逐项原样输出 JSON 中的 return_markdown（CLI 已渲染好的 [点击查看](链接)）
+    #   该字段缺失时才用 return_url 自行渲染，文案统一“点击查看”
+    #   链接地址必须原样使用对应项的 return_url，禁止改写或截断
+    #   （下表“该项 return_url”是占位说明，不是可用地址；实际回复必须替换为 CLI 返回的完整 URL）
+    | 文件名     | 类型   | 大小   | 查看 |
+    |------------|--------|--------|------|
+    | backup     | 文件夹 | —      | [点击查看](该项 return_url) |
+    | report.pdf | 文件   | 1.5 MB | [点击查看](该项 return_url) |
+    | config.yaml| 文件   | 256 KB | [点击查看](该项 return_url) |
 
     共 3 项
 ```
@@ -92,12 +96,12 @@ AI: [执行 bdpan ls]
 
 ```
 用户: 查看 backup 目录下的文件
-AI: [执行 bdpan ls backup]
+AI: [执行 bdpan ls backup --json]
 
-    类型    大小          修改时间              文件名
-    ------  ------------  --------------------  --------
-    文件    2.1 GB        2026-02-19 08:00:00  data-2026-02-19.tar.gz
-    文件    1.8 GB        2026-02-18 08:00:00  data-2026-02-18.tar.gz
+    | 文件名                 | 类型 | 大小   | 查看 |
+    |------------------------|------|--------|------|
+    | data-2026-02-19.tar.gz | 文件 | 2.1 GB | [点击查看](该项 return_url) |
+    | data-2026-02-18.tar.gz | 文件 | 1.8 GB | [点击查看](该项 return_url) |
 
     共 2 项
 ```
@@ -115,16 +119,22 @@ AI: [执行 bdpan ls --json]
     输出:
     [
       {
-        "Name": "report.pdf",
-        "IsDir": false,
-        "Size": 1536000,
-        "Modified": "2026-02-25T15:20:00Z"
+        "fs_id": 123456789,
+        "fsid": "123456789",
+        "server_filename": "report.pdf",
+        "path": "/apps/bdpan/report.pdf",
+        "size": 1536000,
+        "isdir": false,
+        "server_mtime": "2026-02-25T15:20:00Z"
       },
       {
-        "Name": "backup",
-        "IsDir": true,
-        "Size": 0,
-        "Modified": "2026-02-20T10:30:00Z"
+        "fs_id": 987654321,
+        "fsid": "987654321",
+        "server_filename": "backup",
+        "path": "/apps/bdpan/backup",
+        "size": 0,
+        "isdir": true,
+        "server_mtime": "2026-02-20T10:30:00Z"
       }
     ]
 ```
@@ -133,16 +143,19 @@ AI: [执行 bdpan ls --json]
 
 ```bash
 # 提取所有文件名
-bdpan ls --json | jq -r '.[].Name'
+bdpan ls --json | jq -r '.[].server_filename'
+
+# 提取文件 ID（必须使用字符串字段，避免大整数精度丢失）
+bdpan ls --json | jq -r '.[].fsid'
 
 # 只列出文件（排除目录）
-bdpan ls --json | jq '.[] | select(.IsDir == false)'
+bdpan ls --json | jq '.[] | select(.isdir == false)'
 
 # 按大小排序
-bdpan ls --json | jq 'sort_by(.Size) | reverse'
+bdpan ls --json | jq 'sort_by(.size) | reverse'
 
 # 检查文件是否存在
-bdpan ls --json | jq -e '.[] | select(.Name == "target.txt")'
+bdpan ls --json | jq -e '.[] | select(.server_filename == "target.txt")'
 ```
 
 ---
@@ -172,8 +185,38 @@ AI: 正在获取授权链接...
 用户: [粘贴授权码] ca0ee3070f75d0246357e5c74d525bda
 AI: [处理授权码]
 
-    ✓ 登录成功！
-    用户: username@baidu.com
+    登录成功，现在可以使用百度网盘了。
+
+    你可以直接说：
+    - 帮我找一份周末京津冀旅行攻略，整理好后存到网盘
+    - 把刚生成的简历和作品集上传到网盘
+    - 把朋友分享的照片转存到我的网盘
+    - 找出网盘里去年的体检报告
+    - 备份我的 Agent 记忆，方便以后恢复
+```
+
+### 示例 10a: 原任务触发登录
+
+```
+用户: 把刚生成的简历上传到网盘
+AI: [发现未登录，执行 bash ${CLAUDE_SKILL_DIR}/scripts/login.sh --continue-task]
+AI: [用户完成授权后，继续执行原上传任务，不重复输出登录欢迎语]
+```
+
+### 示例 10b: 已有登录态时主动进入登录
+
+```
+用户: 帮我登录百度网盘
+AI: [执行 bash ${CLAUDE_SKILL_DIR}/scripts/login.sh]
+
+    你已登录百度网盘，无需重复授权。
+
+    现在可以直接说：
+    - 帮我找一份周末京津冀旅行攻略，整理好后存到网盘
+    - 把刚生成的简历和作品集上传到网盘
+    - 把朋友分享的照片转存到我的网盘
+    - 找出网盘里去年的体检报告
+    - 备份我的 Agent 记忆，方便以后恢复
 ```
 
 ---
@@ -183,45 +226,58 @@ AI: [处理授权码]
 ### 示例 15a: 转存无码公开分享链接
 
 ```
-用户: 帮我把这个无码分享链接转存到网盘 https://pan.baidu.com/s/5xxxxx
-AI: [执行 bdpan transfer "https://pan.baidu.com/s/5xxxxx"]
+用户: 帮我把这个无码分享链接转存到网盘 <百度网盘分享链接>
+AI: [执行 bdpan transfer "<百度网盘分享链接>"]
 
     ✓ 转存成功！
-    文件已保存到：我的应用数据/bdpan/
+    文件已保存到：我的应用数据/bdpan/学习资料/课程讲义.pdf
 ```
 
 ### 示例 15: 转存分享链接（提取码在链接中）
 
 ```
-用户: 帮我把这个链接转存到网盘 https://pan.baidu.com/s/1xxxxx?pwd=abcd
-AI: [执行 bdpan transfer "https://pan.baidu.com/s/1xxxxx?pwd=abcd"]
+用户: 帮我把这个链接转存到网盘 <百度网盘分享链接>?pwd=abcd
+AI: [执行 bdpan transfer "<百度网盘分享链接>?pwd=abcd"]
 
     ✓ 转存成功！
-    文件已保存到：我的应用数据/bdpan/
+    文件已保存到：我的应用数据/bdpan/学习资料/课程讲义.pdf
 ```
 
 ### 示例 16: 转存到指定目录
 
 ```
-用户: 把 https://pan.baidu.com/s/1xxxxx 转存到 shared 目录，提取码是 efgh
-AI: [执行 bdpan transfer "https://pan.baidu.com/s/1xxxxx" -p efgh -d shared/]
+用户: 把 <百度网盘分享链接> 转存到 shared 目录，提取码是 efgh
+AI: [执行 bdpan transfer "<百度网盘分享链接>" -p efgh -d shared/]
 
     ✓ 转存成功！
-    文件已保存到：我的应用数据/bdpan/shared/
+    文件已保存到：我的应用数据/bdpan/shared/课程讲义.pdf
 ```
 
 ### 示例 17: 转存并查看结果（JSON）
 
 ```bash
-bdpan transfer "https://pan.baidu.com/s/1xxxxx?pwd=abcd" --json
+bdpan transfer "<百度网盘分享链接>?pwd=abcd" --json
 # 输出:
 # {
-#   "status": "success",
-#   "remote_path": "shared-file.pdf",
-#   "share_link": "https://pan.baidu.com/s/1xxxxx",
-#   "file_count": 1
+#   "saved_path": "我的应用数据/bdpan/shared/",
+#   "count": 1,
+#   "files": [
+#     {
+#       "name": "课程讲义.pdf",
+#       "path": "/apps/bdpan/shared/课程讲义.pdf",
+#       "saved_path": "我的应用数据/bdpan/shared/课程讲义.pdf",
+#       "return_url": "https://pan.baidu.com/union/spirit/launch?...",
+#       "return_target_type": "directory",
+#       "return_hint": "点击查看",
+#       "return_markdown": "[点击查看](该项 return_url)",
+#       "size": 47104,
+#       "is_dir": false
+#     }
+#   ]
 # }
 ```
+
+回端链接的文件目标（`target=file`）和目录目标（`target=dir`）都由网盘主端判断能否预览，因此展示文案统一为“点击查看”，以 CLI 返回的 `return_hint` 为准。Agent 应优先原样输出 CLI 预渲染的 `return_markdown`；Skill 不自行拼接或改写回端 URL，也不按扩展名判断可预览性。
 
 ---
 
@@ -231,30 +287,30 @@ bdpan transfer "https://pan.baidu.com/s/1xxxxx?pwd=abcd" --json
 
 ```
 用户: 在网盘里搜索 report
-AI: [执行 bdpan search report]
+AI: [执行 bdpan search report --json]
 
     找到 3 个结果（第 1 页，共 1 页）
 
-    #   名称              类型    大小      修改时间
-    --- ----------------- ------- --------- ----------------
-    1   report.pdf        文档    1.5 MB    2026-02-25 15:20
-    2   report-draft.docx 文档    256 KB    2026-02-24 09:15
-    3   report-backup     目录    -         2026-02-20 10:30
+    | # | 名称              | 类型   | 大小    | 查看 |
+    |---|-------------------|--------|---------|------|
+    | 1 | report.pdf        | 文档   | 1.5 MB  | [点击查看](该项 return_url) |
+    | 2 | report-draft.docx | 文档   | 256 KB  | [点击查看](该项 return_url) |
+    | 3 | report-backup     | 文件夹 | —       | [点击查看](该项 return_url) |
 ```
 
 ### 示例 19: 按类型搜索
 
 ```
 用户: 搜索网盘里所有的图片文件
-AI: [执行 bdpan search "" --category 3 --no-dir]
+AI: [执行 bdpan search "" --category 3 --no-dir --json]
 
     找到 5 个结果（第 1 页，共 1 页）
 
-    #   名称              类型    大小      修改时间
-    --- ----------------- ------- --------- ----------------
-    1   photo.jpg         图片    3.2 MB    2026-03-15 14:30
-    2   screenshot.png    图片    1.1 MB    2026-03-10 09:20
-    ...
+    | # | 名称          | 类型 | 大小   | 查看 |
+    |---|---------------|------|--------|------|
+    | 1 | photo.jpg     | 图片 | 3.2 MB | [点击查看](该项 return_url) |
+    | 2 | screenshot.png | 图片 | 1.1 MB | [点击查看](该项 return_url) |
+    | … | …             | …    | …      | 每项均按 `return_url` 提供链接 |
 ```
 
 ---
@@ -354,7 +410,7 @@ echo "备份完成: ${BACKUP_FILE}"
 # 检查文件是否已上传
 check_uploaded() {
   local file=$1
-  bdpan ls --json | jq -e ".[] | select(.Name == \"${file}\")" > /dev/null
+  bdpan ls --json | jq -e ".[] | select(.server_filename == \"${file}\")" > /dev/null
 }
 
 if check_uploaded "report.pdf"; then

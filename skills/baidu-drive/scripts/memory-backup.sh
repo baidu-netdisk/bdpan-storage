@@ -406,7 +406,12 @@ check_prerequisites() {
     local login_script="${skill_dir}/scripts/login.sh"
     if [ -f "$login_script" ]; then
       echo "请先登录百度网盘："
-      bash "$login_script"
+      # 这是原任务触发的自动登录：登录成功后静默返回，避免重复欢迎语。
+      bash "$login_script" --continue-task
+      if [[ "$(_bdpan_whoami)" != loggedIn=true* ]]; then
+        echo "登录未完成，已停止当前记忆操作。请完成手动授权后重试。" >&2
+        exit 1
+      fi
     else
       echo "请先登录百度网盘：bash \${CLAUDE_SKILL_DIR}/scripts/login.sh" >&2
       exit 1
