@@ -13,10 +13,16 @@ NC='\033[0m' # No Color
 
 # 解析参数
 SKIP_CONFIRM="no"
+SHOW_WELCOME="yes"
 while [[ $# -gt 0 ]]; do
     case $1 in
         --yes|-y)
             SKIP_CONFIRM="yes"
+            shift
+            ;;
+        --continue-task|--quiet|--no-welcome)
+            # 被原任务自动调用时，登录成功后静默返回，让调用方继续原任务。
+            SHOW_WELCOME="no"
             shift
             ;;
         --help|-h)
@@ -24,6 +30,7 @@ while [[ $# -gt 0 ]]; do
             echo ""
             echo "选项:"
             echo "  --yes, -y    跳过安全确认（自动化场景）"
+            echo "  --continue-task  登录成功后不输出欢迎语，供原任务继续执行"
             echo "  --help       显示帮助信息"
             exit 0
             ;;
@@ -45,6 +52,48 @@ log_error() {
     echo -e "${RED}[ERROR]${NC} $1"
 }
 
+manual_login_hint() {
+    local script_dir
+    script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+    echo ""
+    echo "请重新执行手动授权登录后再试："
+    echo "bash \"${script_dir}/scripts/login.sh\""
+}
+
+fail_login() {
+    local reason="$1"
+    if [ -z "$reason" ]; then
+        reason="CLI 未返回具体失败原因"
+    fi
+    log_error "登录失败：${reason}"
+    manual_login_hint
+    exit 1
+}
+
+print_capability_examples() {
+    echo "- 帮我找一份周末京津冀旅行攻略，整理好后存到网盘"
+    echo "- 把刚生成的简历和作品集上传到网盘"
+    echo "- 把朋友分享的照片转存到我的网盘"
+    echo "- 找出网盘里去年的体检报告"
+    echo "- 备份我的 Agent 记忆，方便以后恢复"
+}
+
+print_success_welcome() {
+    echo ""
+    echo "登录成功，现在可以使用百度网盘了。"
+    echo ""
+    echo "你可以直接说："
+    print_capability_examples
+}
+
+print_already_logged_welcome() {
+    echo ""
+    echo "你已登录百度网盘，无需重复授权。"
+    echo ""
+    echo "现在可以直接说："
+    print_capability_examples
+}
+
 # 检查 bdpan 是否已安装
 if ! command -v bdpan &> /dev/null; then
     log_error "bdpan 未安装，请先运行: bash scripts/install.sh"
@@ -58,8 +107,10 @@ log_info "检查登录状态..."
 BDPAN_VERSION=$(bdpan version 2>/dev/null | head -1 || echo "unknown")
 
 if bdpan whoami 2>/dev/null | grep -q "已登录"; then
-    log_warn "已经登录，无需重复登录"
-    bdpan whoami
+    # 用户主动登录时给出可执行的场景提示；原任务前置登录保持静默。
+    if [ "$SHOW_WELCOME" = "yes" ]; then
+        print_already_logged_welcome
+    fi
     exit 0
 fi
 
@@ -117,14 +168,20 @@ fi
 # 获取授权链接
 log_info "正在获取授权链接..."
 
-if ! AUTH_URL=$(bdpan login --get-auth-url --accept-disclaimer 2>/dev/null); then
-    log_error "获取授权链接失败"
-    exit 1
+# 成功路径只取 stdout：CLI 在 exit 0 时也可能向 stderr 输出版本/升级提示，
+# 若用 2>&1 合并会让 AUTH_URL 变成「URL + 噪声」的混合串，后续纯文本行和
+# Markdown 链接都会损坏，Agent 抓到的链接无法跳转。
+# 失败路径单独从临时文件读取 stderr 作为错误原因。
+AUTH_ERR_FILE="$(mktemp "${TMPDIR:-/tmp}/bdpan-auth-err-XXXXXX")"
+if ! AUTH_URL=$(bdpan login --get-auth-url --accept-disclaimer 2>"$AUTH_ERR_FILE"); then
+    AUTH_ERROR="$(cat "$AUTH_ERR_FILE" 2>/dev/null || true)"
+    rm -f "$AUTH_ERR_FILE"
+    fail_login "获取授权链接失败：${AUTH_ERROR}"
 fi
+rm -f "$AUTH_ERR_FILE"
 
 if [ -z "$AUTH_URL" ]; then
-    log_error "获取授权链接失败"
-    exit 1
+    fail_login "获取授权链接失败：CLI 返回了空授权链接"
 fi
 
 # 显示授权链接
@@ -168,42 +225,37 @@ read -r -s AUTH_CODE
 echo
 
 if [ -z "$AUTH_CODE" ]; then
-    log_error "授权码不能为空"
-    exit 1
+    fail_login "授权码不能为空"
 fi
 
 # 校验授权码格式：32 位十六进制字符，不通过子进程传递或输出原值
 if [[ ! "$AUTH_CODE" =~ ^[a-fA-F0-9]{32}$ ]]; then
-    log_error "授权码格式不正确（应为 32 位十六进制字符）"
-    log_error "请确认您复制的是完整的授权码"
-    exit 1
+    fail_login "授权码格式不正确（应为 32 位十六进制字符），请确认复制完整"
 fi
 
 # 使用授权码完成登录
 log_info "正在使用授权码完成登录..."
 
 # 通过 stdin 传递授权码，避免在进程参数中泄露
-if ! LOGIN_ERROR=$(printf '%s\n' "$AUTH_CODE" | bdpan login --set-code-stdin --accept-disclaimer 2>&1 >/dev/null); then
+if ! LOGIN_ERROR=$(printf '%s\n' "$AUTH_CODE" | bdpan login --set-code-stdin --accept-disclaimer 2>&1); then
     LOGIN_ERROR=${LOGIN_ERROR//$AUTH_CODE/[授权码已隐藏]}
     unset AUTH_CODE
-    if [ -n "$LOGIN_ERROR" ]; then
-        log_error "登录失败：${LOGIN_ERROR}"
-    else
-        log_error "登录失败，请检查授权码是否正确"
-    fi
+    fail_login "$LOGIN_ERROR"
     unset LOGIN_ERROR
-    exit 1
 fi
 unset LOGIN_ERROR
 
 # 立即清除内存中的授权码
 unset AUTH_CODE
 
-# 验证登录
-if bdpan whoami &> /dev/null; then
-    log_info "✓ 登录成功！"
-    bdpan whoami
+# 验证登录，并区分命令失败与未登录状态，保留 CLI 实际原因。
+WHOAMI_OUTPUT=""
+if WHOAMI_OUTPUT=$(bdpan whoami 2>&1) && printf '%s\n' "$WHOAMI_OUTPUT" | grep -q "已登录"; then
+    if [ "$SHOW_WELCOME" = "yes" ]; then
+        log_info "✓ 登录成功！"
+        print_success_welcome
+    fi
 else
-    log_error "登录失败，请检查授权码是否正确"
-    exit 1
+    fail_login "$WHOAMI_OUTPUT"
 fi
+unset WHOAMI_OUTPUT

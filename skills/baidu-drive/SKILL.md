@@ -7,7 +7,6 @@ description: >-
            或用户提及"备份记忆"、"恢复记忆"、"查看记忆备份"等记忆相关操作。
   DO NOT TRIGGER: 非文件存储操作，或使用其他云盘服务时；本地记忆整理/清理操作；PPT 生成操作（已独立为 baidu-wenku-aippt skill）。
 allowed-tools: Bash, Read, Glob, Grep, AskUserQuestion
-argument-hint: "[操作指令]"
 ---
 
 # 百度网盘存储 Skill
@@ -23,7 +22,7 @@ argument-hint: "[操作指令]"
 同时满足以下条件才执行：
 
 1. 用户明确提及"百度网盘"、"bdpan"、"网盘"
-2. 操作意图明确（上传/下载/转存/分享/查看/搜索/移动/复制/重命名/创建文件夹/登录/注销）
+2. 操作意图明确（上传/下载/转存/分享/查看/搜索/移动/复制/重命名/创建文件夹/删除/登录/注销）
 
 未通过触发规则时，禁止执行任何 bdpan 命令。
 
@@ -31,16 +30,16 @@ argument-hint: "[操作指令]"
 
 ### 所有命令公共参数（Agent 必传）
 
-`--agentname`、`--session-input` 和 `--session-id` 是所有 `bdpan` CLI 子命令的公共命令参数，必须附加在具体命令调用中使用，不是独立命令。
+`--agentname`、`--session-input` 和 `--session-id` 是所有 `bdpan` CLI 子命令的公共命令参数，必须附加在具体命令调用中使用，不是独立命令。需要生成文件回端链接时，还要透传 Agent 上下文参数 `--uid` 和 `--traceid`。
 
 ```bash
-bdpan <command> [命令参数] --agentname "<Agent 名称>" --session-input '<本轮用户原始输入>' --session-id "<当前会话 ID>"
+bdpan <command> [命令参数] --agentname "<Agent 名称>" --session-input '<本轮用户原始输入>' --session-id "<当前会话 ID>" [--uid "<Agent 上下文 UID>" --traceid "<Agent 上下文 Trace ID>"]
 ```
 
 例如：
 
 ```bash
-bdpan search --keyword "用户要找的文件" --agentname "claude-code" --session-input "用户要找的文件" --session-id "1784035443-a1b2c3"
+bdpan search "<query>" --json --agentname "claude-code" --session-input "用户要找的文件" --session-id "1784035443-a1b2c3" --uid "<宿主注入的 uid>" --traceid "<宿主注入的 traceid>"
 ```
 
 #### `--agentname`
@@ -59,7 +58,13 @@ bdpan search --keyword "用户要找的文件" --agentname "claude-code" --sessi
 - **生成时机**：在对话中第一次需要调用 `bdpan` CLI 子命令时生成，后续复用。
 - **兜底容错**：CLI 不会因缺少该参数而报错或影响命令执行。
 
-> 以上参数仅用于服务质量追踪，不参与命令的业务逻辑或结果处理。不要自行编造或覆盖参数值。
+#### `--uid` / `--traceid`（回端上下文）
+- **作用**：为文件回端链接提供 Agent/宿主上下文归因信息，不是网盘账号身份，也不替代 CLI 自动获取的 `owner_uid`。
+- **来源**：由宿主或 Agent 运行时注入并在命令间原样透传；不得向用户索取、展示或用用户名、`session-id` 猜测。`traceid` 已由登录流程或宿主自动注入时，保持原值。
+- **适用范围**：仅当命令需要生成文件回端链接时使用；目录链接仍由 CLI 使用目标路径和 `owner_uid` 生成。
+- **缺失处理**：这两个值是可选的归因参数，不是生成文件链接的前提——文件链接只需要 `fsid` 与 `owner_uid`。宿主未注入时 CLI 仍返回 `target=file` 链接，Skill 照常原样展示 `return_markdown`，不得因此声称无法生成查看链接，也不得自行伪造这两个值。
+
+> `--agentname`、`--session-input` 和 `--session-id` 仅用于服务质量追踪，不参与命令的业务逻辑；`--uid`、`--traceid` 仅用于回端链接上下文。所有参数都不要自行编造或覆盖。
 
 ### 记忆备份/恢复触发
 
@@ -97,7 +102,7 @@ bdpan search --keyword "用户要找的文件" --agentname "claude-code" --sessi
 每次触发时按顺序执行：
 
 1. **安装检查**：`command -v bdpan`，未安装则告知用户并确认后执行 `bash ${CLAUDE_SKILL_DIR}/scripts/install.sh`（用户确认后可加 `--yes` 跳过安装器内部确认）
-2. **登录检查**：`bdpan whoami`，未登录则引导执行 `bash ${CLAUDE_SKILL_DIR}/scripts/login.sh`。（**重要：** 向用户展示授权链接时，必须将链接提取到代码块外部，并严格使用 Markdown 格式 `[点击此处完成授权登录](URL)` 进行回复，确保手机端可点击）
+2. **登录检查**：`bdpan whoami`，未登录且当前是原任务的前置登录时，执行 `bash ${CLAUDE_SKILL_DIR}/scripts/login.sh --continue-task`；登录成功后立即继续原任务，不重复输出独立登录欢迎语。用户明确要求登录时才执行不带该参数的 `login.sh`，以展示场景化欢迎语；即使已有有效登录态，也应提示“已登录，无需重复授权”并给出可直接使用的自然语言示例。不要把 `bdpan whoami` 的用户名、Token 有效期等原始状态字段当作欢迎语，除非用户明确要求查看账号状态。（**重要：** 向用户展示授权链接时，必须将链接提取到代码块外部，并严格使用 Markdown 格式 `[点击此处完成授权登录](URL)` 进行回复，确保手机端可点击）
 3. **路径校验**：验证远端路径在 `/apps/bdpan/` 范围内
 
 ---
@@ -106,14 +111,26 @@ bdpan search --keyword "用户要找的文件" --agentname "claude-code" --sessi
 
 | 风险等级 | 操作 | 策略 |
 |----------|------|------|
-| **高（必须确认）** | `rm` 删除、上传/下载目标已存在同名文件 | 列出影响范围，等待用户确认 |
+| **高（需明确意图 + 明确确认）** | `rm` 删除、上传/下载目标已存在同名文件 | 删除只在用户明确提出时执行，并且必须先列出待删对象、等待用户明确确认后才调用命令 |
 | **中（路径模糊时确认）** | upload、download、mv、rename、cp | 路径明确直接执行，不明确则确认 |
-| **低（直接执行）** | ls、search、whoami、mkdir、share | 无需确认 |
+| **低（直接执行）** | ls、search、whoami、mkdir、share、vip | 无需确认 |
 
 **额外规则：**
 - 操作意图模糊（"处理文件"→确认上传还是下载）→ 必须确认
 - 序数/代词引用有歧义（"第N个"、"它"、"上面那个"）→ 必须确认
 - 用户取消意图（"算了"、"不要了"、"取消"）→ 立即中止，不执行任何命令
+
+#### 删除规则（`rm`）
+
+`rm` 仅在用户明确提出删除意图时执行，不主动建议删除，并且必须先取得用户的明确确认。执行前必须：
+
+1. 核对目标路径明确、位于 `/apps/bdpan/` 范围内，并在需要时用 `bdpan ls --json` 区分文件和文件夹；
+2. 目标存在歧义、用户表达取消，或用户只是询问删除方法时，不执行 `rm`，应先澄清；
+3. **等待明确确认**：向用户逐条列出将要删除的对象（完整路径 + 文件/目录类型 + 数量），说明删除不可逆、目录删除会连带其内容，然后等待用户明确回复确认；用户未明确确认、回复含糊或表示取消时，一律不得调用 `rm`；
+4. 取得确认后调用 `bdpan rm <路径...> --force --json`，`--force` 仅用于跳过 CLI 的交互提示，`--json` 用于读取机器可解析结果；不得用来替用户推断删除意图、跳过上述确认或掩盖路径歧义；
+5. 删除完成后仅报告 CLI 实际返回的成功数量；失败时保留错误原因，不得把“已取消”描述为“已删除”。
+
+同一轮对话中用户已针对同一批对象明确确认过，无需重复确认；目标集合发生任何变化（新增路径、路径改写、范围扩大）都必须重新确认。
 
 ---
 
@@ -125,11 +142,23 @@ bdpan search --keyword "用户要找的文件" --agentname "claude-code" --sessi
 bdpan whoami
 ```
 
+### 会员开通/续费
+
+```bash
+bdpan vip --json
+```
+
+用户表达付费意图（"想充会员""开通会员""怎么续费""买超级会员""扩容"等）时，调用 `bdpan vip --json`，把 CLI 返回的两条收银台链接都给用户：移动端 + 电脑端。当前无法区分用户在手机还是电脑上，所以两条都给，并说明按设备选择；禁止只给一条、禁止自行拼接或替换其它支付地址。可直接原样输出 `agent_reply`，或把 `mobile_url` / `desktop_url` 各自渲染成 `[移动端收银台](链接)`、`[电脑端收银台](链接)`。会员价格与权益一律以收银台页面为准，不得凭记忆编造。
+
 ### 列表查询
 
 ```bash
 bdpan ls [目录路径] [--json] [--order name|time|size] [--desc] [--folder]
 ```
+
+用户说“查看文件”“列出目录”等自然语言时，必须调用 `bdpan ls ... --json`，不要依赖普通表格输出。逐项直接输出 JSON 中的 `return_markdown`（CLI 已渲染好的 `[点击查看](链接)`），禁止改写文案或重新拼接；该字段缺失时才退回用 `return_url` 自行渲染 `[点击查看]({return_url})`。两个字段都没有时只说明暂时无法生成查看链接，不得根据路径或文件名自行拼接。
+
+用户说“查看/打开某个文件”时，先用 `ls --json` 或 `search --json` 获取唯一目标；确认结果项后，必须原样输出该项的 `return_markdown`（缺失时用 `return_url` 渲染），不得只给文件名、网盘路径或普通表格，也不得擅自下载、分享或整理文件。
 
 ### 上传
 
@@ -194,23 +223,32 @@ Agent 执行大文件后台下载时的行为规范：
 **分享链接下载（先转存再下载到本地）：**
 
 ```bash
-bdpan download "https://pan.baidu.com/s/5xxxxx" ./downloaded/  # 无码公开分享
-bdpan download "https://pan.baidu.com/s/1xxxxx?pwd=abcd" ./downloaded/
-bdpan download "https://pan.baidu.com/s/1xxxxx" ./downloaded/ -p abcd    # 提取码单独传入
-bdpan download "https://pan.baidu.com/s/1xxxxx?pwd=abcd" ./downloaded/ -t my-folder  # 指定转存目录
+bdpan download "https://pan.baidu.com/s/<分享标识>" ./downloaded/  # 无码公开分享
+bdpan download "https://pan.baidu.com/s/<分享标识>?pwd=abcd" ./downloaded/
+bdpan download "https://pan.baidu.com/s/<分享标识>" ./downloaded/ -p abcd    # 提取码单独传入
+bdpan download "https://pan.baidu.com/s/<分享标识>?pwd=abcd" ./downloaded/ -t my-folder  # 指定转存目录
 ```
 
-> 分享链接下载支持 `/s/1`、`/s/5` 等分享链接前缀。未携带 `?pwd=` 且用户未提供 `-p` 时，直接执行命令，不预先追问提取码；由 CLI 判断链接是否为无码公开分享。分享链接下载同样适用大文件策略：转存完成后，用 `bdpan ls --json` 获取文件大小，再按上述策略执行下载。
+> 分享链接下载接受用户提供的百度网盘分享链接，链接中的内部标识由 CLI 解析，Skill 不向用户解释或要求选择内部前缀。未携带 `?pwd=` 且用户未提供 `-p` 时，直接执行命令，不预先追问提取码；由 CLI 判断链接是否为无码公开分享。分享链接下载同样适用大文件策略：转存完成后，用 `bdpan ls --json` 获取文件大小，再按上述策略执行下载。
 
 ### 转存
 
 将分享文件转存到网盘，**不下载到本地**（与 download 分享链接模式的区别）。
 
 ```bash
-bdpan transfer "https://pan.baidu.com/s/5xxxxx" [-p 提取码] [-d 目标目录] [--json]
+bdpan transfer "https://pan.baidu.com/s/<分享标识>" [-p 提取码] [-d 目标目录] [--json]
 ```
 
-步骤：确认分享链接是标准 `https://pan.baidu.com/s/...` 格式 → 如果链接含 `?pwd=` 或用户明确提供提取码则保留该提取码，否则不要求用户补充 → 确认目标目录 → 执行。转存成功后只展示本次转存的文件（非整个目录），显示数量和目标目录。
+步骤：确认用户提供的是百度网盘分享链接 → 如果链接含 `?pwd=` 或用户明确提供提取码则保留该提取码，否则不要求用户补充 → 确认目标目录 → 执行。转存成功后只展示本次转存的文件（非整个目录），逐项回显 CLI 返回的实际完整保存路径，不得只展示目标目录。
+
+分享链接中的内部标识和前缀属于 CLI 解析规则，Skill 只需原样传入用户提供的链接，不在回复中拆解、比较或引导用户选择前缀。
+
+**异步转存状态：**
+
+- CLI 返回完成文件列表时，才可以回复“转存成功”，并逐项回显实际保存路径和查看入口。
+- 返回 `status=submitted` 时，只表示任务已提交，仍在排队、执行或暂时无法查询；必须保留 `task_id` 和保存位置，不得回复“转存成功”，也不得生成完成文件的查看链接。
+- 如果任务查询返回权限/权益错误（例如 `-6`、`13998`、`13080`、`13081`），这表示当前 Skill 暂时无法读取任务状态，不等于转存失败。告知用户任务已提交、不要重复提交同一任务，稍后在百度网盘确认结果。
+- `errno=13070` 在短暂重试后仍未找到任务时，同样保留 `task_id` 并提示稍后重试，不要重新提交同一任务。
 
 #### 选择性转存
 
@@ -237,6 +275,7 @@ bdpan transfer list "<分享链接>" --source-dir "<item.path>" --page 1 --page-
 Agent 必须遵守以下规则：
 
 - 用名称和序号向用户展示当前页内容；不得要求用户手工输入 `fs_id`；
+- `fs_id` 只是内部标识，禁止在面向用户的回复中展示（正文、表格、括号补充说明一律不写）；用户明确要求时才给出；
 - 在内部将 JSON 中的 `fs_id` 按字符串原样保存，禁止转为 JavaScript Number；
 - 用户说“进入某目录”时，使用该项的 `path` 作为下一次 `--source-dir`；
 - `has_more=true` 时可将 `--page` 加 1 查询下一页，下一页为空时停止；
@@ -260,12 +299,69 @@ bdpan transfer select "<分享链接>" --fsid "<fs_id>[,<fs_id>...]" --dir "<目
 | `errno=13003` 且未提供提取码 | 该分享链接需要提取码，请补充提取码后重试。 | 是 |
 | `errno=13003` 且已提供提取码 | 提取码错误，请检查提取码后重试。 | 是 |
 | `errno=13004` | 分享链接已失效、已取消或不存在。 | 否 |
+| `errno=13070`（任务查询重试后仍不存在） | 任务状态暂时无法查询，转存可能仍在执行。保留任务 ID，稍后再查，不要重复提交。 | 否，先等待 |
+| `errno=13071` | 已有其他转存任务正在进行，请等待约 5 分钟后再试。 | 等待后重试 |
 | `transfer select` 返回 `errno=13061` | 选择的文件 ID 不正确或已不存在，请重新查询分享内容并检查所选 `fs_id`。 | 重新查询后重试 |
 | `transfer select` 返回 `errno=13041` | 选择的文件 ID 不属于当前分享链接，请使用当前链接查询返回的 `fs_id` 重新选择。 | 重新选择后重试 |
 | `errno=13072` 或 `errno=13073` | 已达到账号单次转存数量上限，询问是否改为选择性转存。 | 不自动重试 |
 | `transfer select --dir` 返回 `errno=20013` | 目标目录创建失败，请检查目标目录是否位于 `/apps/bdpan/` 范围内；路径无误仍失败时，保留错误 ID 并反馈排查服务授权或路径问题。 | 检查路径后重试 |
 
 数量上限按目录递归后的实际内容计算：普通用户 500、VIP 3000、SVIP 50000。不得自动拆分、自动重试或承诺选择一个目录一定成功。
+
+### 成功结果与实际保存路径
+
+上传或转存成功后，回复必须包含实际完整保存路径，例如：`文件已保存到：我的应用数据/bdpan/项目资料/周报.md`。不要只回显“目标目录”或用户输入的相对路径。
+
+- `upload`：优先读取 CLI 成功结果中的 `saved_path`；单文件直接回显该路径。文件夹上传的 `saved_path` 是实际目标目录，如需逐项列出文件，再用 `bdpan ls --json` 核对该目录。
+- `transfer`：使用 JSON 结果中每个文件的 `saved_path` 字段逐项回显（顶层 `saved_path` 仅是共同目标目录）；兼容旧版 `files[].path` 或 `remote_path`。只有确认任务已完成后才能使用“已保存”。`status=submitted` 只能表述为“转存任务已提交”，不能声称文件已保存。
+- 展示路径统一使用“我的应用数据/bdpan/...”形式，不向用户暴露 `/apps/bdpan/...` API 路径。
+
+### 回端链接（点击查看）
+
+以下命令成功后，Agent 必须优先读取 CLI JSON 返回的 `return_markdown`，直接原样输出该值；只有该字段缺失时才退回用 `return_url` 和 `return_hint` 自行组装 Markdown 链接：
+
+`upload`、`download`、`transfer`、`search`、`ls`、`cp`、`mv`、`rename`、`mkdir`。
+
+- `return_markdown` 是 CLI 已渲染好的 `[点击查看](链接)`，禁止改写文案、截断链接或只取其中的 URL 重新拼接。
+- 不带 `--json` 的表格输出中，链接已并入名称列（`名称 → 链接`）。重排结果时必须把该单元格整体保留，禁止只抄名称丢掉链接。
+- 单结果命令（`upload`、`download`、`cp`、`mv`、`rename`、`mkdir`、单文件 `transfer`）必须在结果回复中追加一行 `return_markdown`，只回显路径不给链接视为未完成展示要求。
+
+- `return_url` 是 CLI/网盘服务生成的不透明值，Skill 不得自行拼接、改写或替换查询参数。`return_hint` 只是展示提示，不能据此推断目标一定支持预览。
+- 当前 v1.7.5 CLI 使用正式 `union/spirit/launch` 协议，文件目标返回 `target=file`、目录目标返回 `target=dir`，两类目标能否预览由网盘主端判断。因此文件和文件夹结果统一展示 `[点击查看]({return_url})`，Skill 不按扩展名、MIME 或文件名自行判断可预览性。
+- `client_return_target_type` 只说明端内协议目标是文件还是目录，不改变展示文案；服务端未来若返回其他 `return_target_type`，仍以 CLI 返回的 `return_hint` 为准。
+- 多个结果：每个结果项分别使用自己的 `return_url` 和 `return_hint`，不能把多个对象合并成一个猜测链接；`fs_id` 必须按字符串原样传递，不能转为 JavaScript Number。
+- 每次成功任务的实际文件/文件夹结果都必须带对应的字符串 `fsid`（兼容保留 `fs_id`），或已生成的 `return_url`；Skill 不得仅凭文件名、相对路径或列表序号猜测 fsid。
+- `fsid`/`fs_id`、`owner_uid`、`uid`、`traceid` 都是内部标识与上下文参数，只用于调用 CLI 和生成链接，禁止在面向用户的回复中展示（含正文、表格列、括号补充）；用户对外可见的只有名称、路径、大小、时间和 `return_markdown` 链接。用户明确索要时才可给出。
+- `transfer select` 返回 `status=submitted` 时只表示任务已提交，不能提前生成或宣称已完成对象的回端链接；待 CLI 返回实际完成结果后再展示。
+- 禁止用脚本、jq、python 等方式二次裁剪 CLI 的 JSON 结果字段后再回复：实测中"只取 `saved_path`/`message`"会把链接丢掉。CLI 已把链接同时写进 `message` 与 `agent_reply`，直接回显其中一个即可，长对话中也不会漏链接。
+- `agent_reply` 是 CLI 预渲染的整句结果（动作 + 路径 + `[点击查看](链接)`），可直接原样输出；它与 `message`、`return_markdown` 内容一致，任选其一展示，不需要再拼接。
+- `share` 只复用 CLI 已返回的 `link`/`short_url` 分享链接，不额外生成 `return_url`；`rm` 不返回回端链接。
+
+回端链接由 CLI/网盘服务按正式协议生成，Skill 不自行拼接或改写 URL。文件链接只需要文件 `fs_id` 和账号 `owner_uid`；目录链接使用目标路径和 `owner_uid`。Agent 上下文中的 `uid`、`traceid` 是可选归因参数，存在则透传进链接，缺失也不影响文件链接生成。`owner_uid` 由 CLI 登录账号信息获取，`uid` 和 `traceid` 由宿主/Agent 上下文透传（通过 CLI 的 `--uid`、`--traceid` 参数），不得向用户索取，也不得用用户名或会话 ID 猜测。`traceid` 若由登录或宿主自动注入，保持原值透传。所有降级形态都仍是统一拉端页 `union/spirit/launch` 链接：缺 `fsid` 时降级为父目录 `target=dir`，连 `owner_uid` 都缺时仅带 `path` + `target=dir` 交由落地页处理身份，不会退化成纯 Web 目录页。
+
+#### 回端字段预留契约
+
+网盘服务后续提供统一链接生成能力时，结果可扩展以下字段。字段由服务端生成，Skill 只负责透传和展示，不负责判断协议或拼接 URL：
+
+- `client_return_url`：客户端/移动端优先使用的端内链接。
+- `web_return_url`：客户端未安装、版本不支持或拉起失败时使用的 Web 链接。
+- `return_target_type`：Web/主链接目标类型；当前 CLI 固定为 `directory`（Web 兜底始终是目录）。
+- `client_return_target_type`：端内目标类型；当前 CLI 对文件返回 `file`、对目录返回 `directory`。缺少 `fsid` 时，文件会降级为所在目录的端内链接，此时该字段为 `directory` 且 `client_return_url_error` 说明降级原因（缺少 Agent 上下文不触发降级）。
+- `return_url`：宿主按访问环境从上述链接中选择的主链接；当前 CLI 尚未稳定提供两类独立 URL 时，仍按现有 `return_url` 兼容处理。
+- `return_markdown`：CLI 用 `return_hint` 和 `return_url` 预渲染好的 Markdown 链接，供宿主原样输出，避免自行拼接时丢链接。
+- `agent_reply`：CLI 预渲染的整句回复（动作 + 路径 + Markdown 链接）。宿主即使只转发单个字段也不会丢链接；同时 `message` 内也已内嵌该链接。
+
+文件与目录的展示文案统一为“点击查看”，以 CLI 返回的 `return_hint` 为准，Skill 不自行改写。服务端暂时无法生成链接时，保留实际保存路径并说明“暂时无法生成查看链接”，不得伪造普通首页或预览地址。
+
+成功结果缺少所需字段、上下文或链接生成失败时，只回显 CLI 实际返回的保存路径/结果，并说明暂时无法生成查看链接；不得伪造链接、把普通 Web 首页链接当作回端链接，或把 `share` 链接当作本人回端链接。失败、取消或无权限结果不展示回端链接。
+
+### 删除
+
+```bash
+bdpan rm <路径> [路径...] [--force] [--json]
+```
+
+仅当用户明确要求删除时执行。先核对目标路径无歧义，再向用户列出待删对象并等待明确确认；取得确认后才调用 `bdpan rm <路径...> --force --json`。`--force` 只用于跳过 CLI 交互提示，`--json` 用于读取结果，不得用于绕过确认、意图或路径校验。目标有歧义、用户取消、用户未明确确认或仅询问删除方法时不得调用命令。
 
 ### 分享
 
@@ -293,16 +389,20 @@ Agent 必须根据用户的语义意图判断有效期，而非仅匹配固定�
 bdpan search <关键词> [--category 0-7] [--no-dir|--dir-only] [--page-size N] [--page N] [--json]
 ```
 
+用户说“搜索”“找一下”等自然语言时，必须追加 `--json`。逐项直接输出结果中的 `return_markdown`；该字段缺失时才用 `return_url` 渲染 `[点击查看]({return_url})`。不得使用普通表格结果替代链接，也不得自行拼接 URL。
+
 category：0=全部 1=视频 2=音频 3=图片 4=文档 5=应用 6=其他 7=种子。`--no-dir` 和 `--dir-only` 互斥。
 
 ### 移动 / 复制 / 重命名 / 创建文件夹
 
 ```bash
-bdpan mv <源路径> <目标目录>
-bdpan cp <源路径> <目标目录>
-bdpan rename <路径> <新名称>       # 第二参数是文件名，非完整路径
-bdpan mkdir <路径>
+bdpan mv <源路径> <目标目录> --json
+bdpan cp <源路径> <目标目录> --json
+bdpan rename <路径> <新名称> --json   # 第二参数是文件名，非完整路径
+bdpan mkdir <路径> --json
 ```
+
+这四个命令必须追加 `--json`，并在结果回复中原样追加该次结果的 `return_markdown`；只回显路径不给链接视为未完成。
 
 `bdpan mv` 返回 `errno=12`（内部服务错误）时，先检查源路径与目标路径是否相同，或是否将文件夹移动到自身；提示用户更换目标目录，不自动重试。
 
@@ -340,7 +440,8 @@ bash ${CLAUDE_SKILL_DIR}/scripts/install.sh [--yes]
 ### 登录 / 注销 / 卸载
 
 ```bash
-bash ${CLAUDE_SKILL_DIR}/scripts/login.sh              # 登录（内置安全免责声明）
+bash ${CLAUDE_SKILL_DIR}/scripts/login.sh              # 用户主动登录（成功后展示欢迎语）
+bash ${CLAUDE_SKILL_DIR}/scripts/login.sh --continue-task  # 原任务前置自动登录（成功后静默返回）
 bdpan logout                                            # 注销
 bash ${CLAUDE_SKILL_DIR}/scripts/uninstall.sh [--yes]   # 卸载
 ```

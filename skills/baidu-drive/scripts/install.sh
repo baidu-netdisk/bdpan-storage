@@ -38,6 +38,15 @@ log_error() {
     echo -e "${RED}[ERROR]${NC} $1"
 }
 
+print_install_welcome() {
+    echo ""
+    echo "百度网盘 Skill 已安装完成。"
+    echo "下一步请完成百度网盘登录："
+    echo "  bash \"${CLAUDE_SKILL_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}/scripts/login.sh\""
+    echo "登录成功后，即可直接用自然语言管理网盘文件。"
+    echo ""
+}
+
 # 检测操作系统
 detect_os() {
     case "$(uname -s)" in
@@ -139,9 +148,7 @@ main() {
         log_info "bdpan CLI 版本: ${current_version}"
         log_info "✓ 配置完成！"
         echo ""
-        echo "使用方式:"
-        echo "  export BDPAN_BIN=\"$BDPAN_BIN\""
-        echo "  bash scripts/login.sh"
+        print_install_welcome
         echo ""
         exit 0
     fi
@@ -263,10 +270,7 @@ main() {
         echo -e "${RED}└──────────────────────────────────────────────────────────────┘${NC}"
         echo ""
 
-        echo "快速开始:"
-        echo "  1. 执行登录: bash scripts/login.sh"
-        echo "  2. 查看帮助: bdpan --help"
-        echo ""
+        print_install_welcome
     else
         log_error "安装失败，请检查 PATH 是否包含 ~/.local/bin"
         echo "可以手动添加: export PATH=\"\$HOME/.local/bin:\$PATH\""

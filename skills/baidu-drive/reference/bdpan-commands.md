@@ -60,6 +60,21 @@ Token 有效期至: 2026-04-04 10:30:00
 
 ---
 
+### vip - 会员开通/续费入口
+
+```bash
+bdpan vip [--json]
+```
+
+用户提到"充会员""开通会员""续费""买 VIP""超级会员"等付费意图时调用，返回百度网盘会员主收银台链接。CLI 无法判断用户当前在移动端还是电脑端，因此**固定返回两条链接**，由用户按设备自选：
+
+- 移动端主收银台：`https://pan.baidu.com/wap/vip/user?from=bdpan`
+- 电脑端主收银台：`https://pan.baidu.com/buy/checkoutcounter?from=bdpan`
+
+`--json` 输出 `mobile_url`、`desktop_url` 与预渲染整句 `agent_reply`；回显时原样输出 `agent_reply`，或把两条链接都渲染成 Markdown 可点击格式。**不得自行拼接、猜测或替换其它支付/收银台地址，也不得只给一条链接。**价格、会员权益、优惠信息以收银台页面为准，CLI 不返回这些内容，不要凭记忆编造。
+
+---
+
 ## 文件操作命令
 
 ### upload - 上传文件
@@ -115,20 +130,20 @@ bdpan download report.pdf ./downloaded-report.pdf
 bdpan download project/ ./project-restore/
 
 # 从无码公开分享链接下载
-bdpan download "https://pan.baidu.com/s/5xxxxx" ./downloaded/
+bdpan download "https://pan.baidu.com/s/<分享标识>" ./downloaded/
 
 # 从分享链接下载（链接中包含提取码）
-bdpan download "https://pan.baidu.com/s/1xxxxx?pwd=abcd" ./downloaded/
+bdpan download "https://pan.baidu.com/s/<分享标识>?pwd=abcd" ./downloaded/
 
 # 使用 -p 参数单独传入提取码
-bdpan download "https://pan.baidu.com/s/1xxxxx" ./downloaded/ -p abcd
+bdpan download "https://pan.baidu.com/s/<分享标识>" ./downloaded/ -p abcd
 
 # 使用 -t 参数自定义转存目录
-bdpan download "https://pan.baidu.com/s/1xxxxx?pwd=abcd" ./downloaded/ -t my-folder
+bdpan download "https://pan.baidu.com/s/<分享标识>?pwd=abcd" ./downloaded/ -t my-folder
 ```
 
 **分享链接下载说明：**
-- 自动识别分享链接格式 `https://pan.baidu.com/s/{prefix}{surl}[?pwd={pwd}]`，支持 `/s/1`、`/s/5` 等前缀
+- 接受用户提供的百度网盘分享链接，内部标识由 CLI 解析，Skill 不解释或要求选择内部前缀
 - 未携带 `?pwd=` 且未使用 `-p` 时，按无码公开分享链接直接尝试，不需要预先填写提取码
 - 分享文件会先转存到 `/apps/bdpan/{日期}/` 目录（或使用 `-t` 指定的目录）
 - 然后下载到指定的本地路径
@@ -153,19 +168,19 @@ bdpan transfer <分享链接> [选项]
 **示例：**
 ```bash
 # 无码公开分享转存到应用根目录 /apps/bdpan/
-bdpan transfer "https://pan.baidu.com/s/5xxxxx"
+bdpan transfer "https://pan.baidu.com/s/<分享标识>"
 
 # 需要提取码的分享，使用 -p 传入
-bdpan transfer "https://pan.baidu.com/s/1xxxxx" -p abcd
+bdpan transfer "https://pan.baidu.com/s/<分享标识>" -p abcd
 
 # 提取码在链接中
-bdpan transfer "https://pan.baidu.com/s/1xxxxx?pwd=abcd"
+bdpan transfer "https://pan.baidu.com/s/<分享标识>?pwd=abcd"
 
 # 指定目标目录
-bdpan transfer "https://pan.baidu.com/s/1xxxxx" -p abcd -d my-folder/
+bdpan transfer "https://pan.baidu.com/s/<分享标识>" -p abcd -d my-folder/
 
 # JSON 输出
-bdpan transfer "https://pan.baidu.com/s/1xxxxx" -p abcd --json
+bdpan transfer "https://pan.baidu.com/s/<分享标识>" -p abcd --json
 ```
 
 **查询分享目录（只读）：**
@@ -204,6 +219,12 @@ bdpan transfer select "<分享链接>" \
 - 执行前必须由 Agent 向用户展示选择清单和目标目录并取得确认；
 - 成功 JSON 的 `status` 为 `submitted`，表示异步任务已提交，不代表服务端已完成全部转存。
 
+普通 `transfer` 和分享链接 `download` 也可能返回 `status=submitted`：此时任务已提交但仍在排队、执行或暂时无法查询。必须保留 `task_id`、转存位置和（下载场景）本地目标路径，不得回复“转存成功/下载成功”，不得展示完成文件的回端链接，也不要重复提交。若任务查询返回 `-6`、`13998`、`13080` 或 `13081` 等权限/权益错误，应说明“任务已提交，但当前账号暂时无法查询状态”，而不是把任务判定为失败。
+
+`errno=13070` 在短暂重试后仍未找到任务时，保留任务 ID 并提示稍后重试；`errno=13071` 表示已有其他转存任务进行中，等待约 5 分钟后再试。
+
+转存完成后，使用结果中每个文件的实际保存路径逐项回复，优先使用 `saved_path`（用户可见的“我的应用数据/bdpan/...”路径），兼容读取 `path` 或旧版 `remote_path`。只有确认任务完成后才能说“已保存”；`status=submitted` 只能说“转存任务已提交”。
+
 **与 download 的区别：**
 - `transfer` 仅将分享文件转存到自己的网盘，不下载到本地
 - `download` 会先转存再下载到本地路径
@@ -224,26 +245,23 @@ bdpan ls [path]
 
 **示例：**
 ```bash
-# 查看根目录
-bdpan ls
-
-# 查看子目录
-bdpan ls backup
-
-# JSON 输出
+# Agent 为了向用户返回“查看网盘”入口，必须使用 JSON
 bdpan ls --json
+
+# 查看子目录并保留每项回端字段
+bdpan ls backup --json
+
+# 仅筛选文件夹
+bdpan ls backup --folder --json
 ```
 
-**输出格式：**
-```
-类型    大小          修改时间              文件名
-------  ------------  --------------------  --------
-目录     -            2026-02-20 10:30:00  documents
-文件    1.5 MB        2026-02-25 15:20:00  readme.txt
-文件    256 KB        2026-02-24 09:15:00  config.yaml
+自然语言“查看文件”“列出目录”时，不得使用无 JSON 的普通表格作为 Agent 的数据源。Agent 必须逐项读取 JSON 中的 `return_markdown` 并原样输出（缺失时才用 `return_url` 渲染 `[点击查看]({return_url})`）。即使用户只查看一个文件，也必须返回该文件对应的查看入口；不能只输出名称、大小或网盘路径。
 
-共 3 项
-```
+当 `return_url` 缺失时，只能回显 CLI 实际返回的路径并说明“暂时无法生成查看链接”，不得按路径、文件名或 `fsid` 自行拼接 URL。
+
+`fsid`/`fs_id`、`owner_uid`、`uid`、`traceid` 属于内部标识，只用于后续 CLI 调用与链接生成，禁止在面向用户的回复中展示（正文、表格列、括号补充说明一律不写）；面向用户可见的字段只有名称、路径、大小、时间和 `return_markdown` 链接。用户明确索要时才可给出。
+
+不得先用脚本、jq 或 python 把 CLI 的 JSON 裁剪成少数字段再回复——实测中「只取 `saved_path`、`fsid`、`message`」会把链接过滤掉。CLI 3.8.7 起把链接同时写进 `message` 与 `agent_reply`（预渲染整句：动作 + 路径 + `[点击查看](链接)`），直接回显其中之一即可。
 
 ### share - 创建分享链接
 
@@ -277,7 +295,7 @@ bdpan share --json report.pdf
 **输出格式：**
 ```
 分享链接创建成功!
-链接: https://pan.baidu.com/s/1xxxxxxx
+链接: <百度网盘分享链接>
 提取码: abcd
 有效期: 7 天
 ```
@@ -306,33 +324,20 @@ bdpan search <关键词> [选项]
 
 **示例：**
 ```bash
-# 搜索文件
-bdpan search report
+# Agent 为了向用户返回每个结果的“查看网盘”入口，必须使用 JSON
+bdpan search report --json
 
 # 搜索图片类型文件
-bdpan search photo --category 3
+bdpan search photo --category 3 --json
 
 # 搜索文件，排除文件夹，每页 10 条
-bdpan search data --no-dir --page-size 10
+bdpan search data --no-dir --page-size 10 --json
 
 # 翻页
-bdpan search report --page 2
-
-# JSON 输出
-bdpan search report --json
+bdpan search report --page 2 --json
 ```
 
-**输出格式：**
-```
-找到 15 个结果（第 1 页，共 3 页）
-
-#   名称              类型    大小      修改时间
---- ----------------- ------- --------- ----------------
-1   report.pdf        文档    1.5 MB    2026-02-25 15:20
-2   report-draft.docx 文档    256 KB    2026-02-24 09:15
-
-提示: 使用 --page 2 查看下一页
-```
+自然语言“搜索”“找一下”时，Agent 必须逐项读取 JSON 结果中的 `return_markdown` 并原样输出（缺失时才用 `return_url` 渲染 `[点击查看]({return_url})`）；不得把结果重新整理成不带链接的路径表。
 
 ### mv - 移动文件或文件夹
 
@@ -445,6 +450,28 @@ bdpan mkdir backup --json
 已创建文件夹: backup
 ```
 
+### rm - 删除文件或文件夹
+
+```bash
+bdpan rm <路径> [路径...] [--force] [--json]
+```
+
+`rm` 支持删除一个或多个文件/文件夹。Skill 仅在用户明确提出删除意图、目标路径无歧义、且已向用户列出待删对象并取得明确确认后才调用。为避免 CLI 的交互式确认阻塞 Agent，应传入 `--force/-f --json`；`--force/-f` 只用于跳过 CLI 提示，`--json` 用于读取机器可解析结果，不得用于推断用户意图、跳过用户确认或绕过路径校验。
+
+执行前可用 `bdpan ls --json` 核对目标并区分文件和文件夹。目标有歧义、用户取消、用户未明确确认或只是询问删除方法时，不执行命令；确认环节必须说明目录删除会影响该目录及其内容，且删除不可逆。
+
+```bash
+# 用户明确要求删除、目标无歧义，且已列出待删对象并取得用户明确确认后
+bdpan rm "docs/old-report.pdf" --force --json
+```
+
+**成功输出：**
+```text
+已删除 N 个文件/文件夹
+```
+
+只根据 CLI 实际返回报告成功数量；失败或取消必须如实说明。
+
 ---
 
 ## 版本管理命令
@@ -517,6 +544,8 @@ PATH 配置建议:
 | `--config-path <path>` | 指定配置文件完整路径（适用于 AI Agent 集成） |
 | `--json` | JSON 格式输出 |
 | `--no-check-update` | 禁用版本更新检查 |
+| `--uid <uid>` | Agent 回端上下文 UID（文件链接使用） |
+| `--traceid <traceid>` | Agent 回端上下文 Trace ID（文件链接使用） |
 | `--help` | 显示帮助 |
 | `--version` | 显示版本 |
 
@@ -524,29 +553,90 @@ PATH 配置建议:
 
 ## JSON 输出格式
 
+### 回端链接字段（v1.7.5）
+
+以下命令成功且链接生成成功时，JSON 结果会返回 `return_url`、`return_hint` 和 `return_markdown`（单结果在顶层，多结果在每个 item 内）：`upload`、`download`、`transfer`、`search`、`ls`、`cp`、`mv`、`rename`、`mkdir`。
+
+当前 CLI 使用正式 `https://pan.baidu.com/union/spirit/launch` 协议生成客户端链接（文件目标 `target=file`、目录目标 `target=dir`），并生成 Web 目录兜底链接。所有 URL 必须当作不透明值处理；目标能否预览由网盘主端判断，CLI 与 Skill 都不做判断，文件和目录的用户文案统一为“点击查看”。
+
+```json
+{
+  "return_url": "https://pan.baidu.com/union/spirit/launch?...",
+  "return_hint": "点击查看",
+  "return_markdown": "[点击查看](https://pan.baidu.com/union/spirit/launch?...)"
+}
+```
+
+- `return_markdown` 是 CLI 已渲染好的 Markdown 链接，Agent 应优先原样输出，不再自行用 `return_hint` + `return_url` 拼接；只有该字段缺失时才退回自行渲染。
+- 不带 `--json` 的 `ls`、`search` 表格输出把链接并入名称列（`名称 → 链接`），宿主重排表格时必须整体保留该单元格。
+- `return_hint` 只是展示提示，当前固定为“点击查看”。`return_target_type` 为 `directory` 表示 Web 兜底目标是目录；`client_return_target_type=file` 表示端内文件目标，`directory` 表示端内目录目标（缺少 `fsid` 时文件会降级为目录目标，并在 `client_return_url_error` 中说明原因；Agent 上下文缺失不触发降级）。
+- 每次成功任务都要返回实际目标的字符串 `fsid`（兼容保留 `fs_id`）或已生成的 `return_url`；Skill 不得仅凭文件名、相对路径或列表序号猜测文件 ID。
+- 文件链接由 CLI 使用 `fs_id` 和 `owner_uid` 生成，`uid`/`traceid` 存在时一并透传、缺失不影响链接生成；目录链接使用目标 `path` 和 `owner_uid`。`owner_uid` 来自已登录账号信息，`uid`、`traceid` 由 Agent 上下文通过 `--uid`、`--traceid` 透传，不能要求用户手工提供或自行猜测。
+- 降级链路始终停留在统一拉端页 `union/spirit/launch`：缺 `fsid` → 父目录 `target=dir`；连 `owner_uid` 也缺 → 仅带 `path` + `target=dir`，由落地页登录后处理身份。`web_return_url` 只是预留字段，不作为 `return_url`。
+- Skill 应把 URL 当作不透明值直接展示，不自行拼接、改写或替换查询参数；缺少字段时回显路径并说明无法生成查看链接。
+- `download` 的回端目标是网盘源文件/源目录，不是本地保存路径；`transfer select` 的 `status=submitted` 不代表任务完成，不能提前返回完成对象链接。
+- `share` 仅返回现有 `link`/`short_url`，不额外增加回端链接；`rm` 不返回 `return_url`。
+- 失败、取消、无权限结果不得返回回端链接字段。
+
+#### 预留字段契约
+
+统一链接生成能力接入后，服务端可在成功结果中补充以下字段；当前 CLI 未稳定提供两类独立 URL 时，这些字段可以省略，Skill 不得自行补造：
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `client_return_url` | string | 客户端/移动端优先使用的端内链接，由服务端生成 |
+| `web_return_url` | string | 客户端未安装、版本不支持或拉起失败时使用的 Web 链接，由服务端生成 |
+| `return_target_type` | string | 当前 CLI 为 `directory`（Web 兜底目标始终是目录） |
+| `client_return_target_type` | string | 当前 CLI 为 `file`（文件）或 `directory`（目录），表示端内目标 |
+| `return_url` | string | 宿主按访问环境选择的主链接；当前兼容字段 |
+
+预留字段示例：
+
+```json
+{
+  "return_target_type": "directory",
+  "return_url": "<按当前环境选择的主链接>",
+  "client_return_url": "<客户端链接>",
+  "web_return_url": "<Web 兜底链接>",
+  "return_hint": "点击查看"
+}
+```
+
+Skill/Agent 不判断客户端协议、文件扩展名或 MIME，也不拼接上述 URL。文件缺少 `fsid` 或 Agent 上下文时，CLI 会降级为所在目录的端内链接；两类链接都无法生成时，仅回显实际路径并说明“暂时无法生成查看链接”及原因。
+
 ### ls 命令输出
 
 ```json
 [
   {
     "fs_id": 524080722157776,
-    "path": "我的应用数据/report.pdf",
+    "fsid": "524080722157776",
+    "path": "/apps/bdpan/report.pdf",
     "server_filename": "report.pdf",
     "size": 1536000,
     "isdir": false,
     "md5": "a1b2c3d4e5f6...",
     "server_mtime": "2026-02-25T15:20:00+08:00",
-    "server_ctime": "2026-02-25T14:00:00+08:00"
+    "server_ctime": "2026-02-25T14:00:00+08:00",
+    "return_url": "https://pan.baidu.com/union/spirit/launch?...",
+    "return_target_type": "directory",
+    "client_return_target_type": "file",
+    "return_hint": "点击查看"
   },
   {
     "fs_id": 841873986109404,
-    "path": "我的应用数据/documents",
+    "fsid": "841873986109404",
+    "path": "/apps/bdpan/documents",
     "server_filename": "documents",
     "size": 0,
     "isdir": true,
     "md5": "",
     "server_mtime": "2026-02-20T10:30:00+08:00",
-    "server_ctime": "2026-02-20T09:00:00+08:00"
+    "server_ctime": "2026-02-20T09:00:00+08:00",
+    "return_url": "https://pan.baidu.com/union/spirit/launch?...",
+    "return_target_type": "directory",
+    "client_return_target_type": "directory",
+    "return_hint": "点击查看"
   }
 ]
 ```
@@ -556,21 +646,27 @@ PATH 配置建议:
 | 字段 | 类型 | 说明 |
 |------|------|------|
 | `fs_id` | number | 文件唯一 ID |
-| `path` | string | 文件路径（中文显示名，如 `我的应用数据/...`） |
+| `fsid` | string | 文件唯一 ID（供回端链接使用，避免大整数精度丢失） |
+| `path` | string | CLI/API 使用的原始网盘路径，如 `/apps/bdpan/...` |
 | `server_filename` | string | 文件名 |
 | `size` | number | 文件大小（字节），目录为 0 |
 | `isdir` | boolean | 是否为目录（`true`/`false`，注意是小写布尔值） |
 | `md5` | string | 文件 MD5 值，目录为空字符串 |
 | `server_mtime` | string | 服务端修改时间（ISO 8601 带时区） |
 | `server_ctime` | string | 服务端创建时间（ISO 8601 带时区） |
+| `return_url` | string | CLI/服务端生成的主回端链接；缺失时不得自行拼接 |
+| `return_markdown` | string | CLI 预渲染的 `[点击查看](链接)`，Agent 优先原样输出 |
+| `return_hint` | string | 用户展示提示；文件与目录统一为“点击查看” |
+| `return_target_type` | string | 当前 CLI 为 `directory`；未来服务端确认 Web 预览协议后可为 `file_preview` |
+| `client_return_target_type` | string | 当前 CLI 为 `file` 或 `directory`，表示端内目标 |
 
-> **注意：** `path` 字段返回中文显示名（`我的应用数据/...`），不是 API 路径（`/apps/bdpan/...`）。展示给用户时可直接使用此路径。
+> **注意：** `path` 是 API 原始路径（`/apps/bdpan/...`），不是用户展示路径。面向用户展示时，优先使用命令返回的 `saved_path`；不要把 `path` 改写后再作为 API 参数传回。
 
 ### share 命令输出
 
 ```json
 {
-  "link": "https://pan.baidu.com/s/1xxxxxxx",
+  "link": "https://pan.baidu.com/s/<分享标识>",
   "short_url": "xxxxxxx",
   "share_id": 25747091668,
   "period": 7,
@@ -578,26 +674,76 @@ PATH 配置建议:
 }
 ```
 
-### upload/download 命令输出
+### upload 命令输出
 
 ```json
 {
-  "status": "success",
-  "local_path": "./report.pdf",
-  "remote_path": "report.pdf"
+  "code": 0,
+  "data": {
+    "message": "上传成功",
+    "local": "./report.pdf",
+    "remote": "report.pdf",
+    "remote_path": "report.pdf",
+    "saved_path": "我的应用数据/bdpan/report.pdf",
+    "fsid": "524080722157776",
+    "return_url": "https://pan.baidu.com/union/spirit/launch?...",
+    "return_target_type": "directory",
+    "client_return_target_type": "file",
+    "return_hint": "点击查看"
+  },
+  "error": ""
 }
 ```
+
+`upload` 成功时从 `data.saved_path` 读取面向用户的实际完整保存路径。旧版 CLI 仅返回 `remote_path` 时，应映射到“我的应用数据/bdpan/...”并在必要时用 `bdpan ls --json` 核对。
+
+### download 命令输出
+
+直接下载成功时，CLI 返回本地保存位置；分享链接下载还会在 `data.saved_path` 返回转存到网盘的实际路径。
+
+```json
+{
+  "code": 0,
+  "data": {
+    "message": "下载成功",
+    "remote": "report.pdf",
+    "local": "./report.pdf",
+    "fsid": "524080722157776",
+    "return_url": "https://pan.baidu.com/union/spirit/launch?...",
+    "return_target_type": "directory",
+    "client_return_target_type": "file",
+    "return_hint": "点击查看"
+  },
+  "error": ""
+}
+```
+
+分享链接下载的 `data` 还包含 `share`、`count` 和 `saved_path`；`saved_path` 表示下载前转存到网盘的目录。
 
 ### transfer 命令输出
 
 ```json
 {
-  "status": "success",
-  "remote_path": "my-folder/shared-file.pdf",
-  "share_link": "https://pan.baidu.com/s/1xxxxx",
-  "file_count": 1
+  "saved_path": "我的应用数据/bdpan/my-folder/",
+  "count": 1,
+  "files": [
+    {
+      "name": "shared-file.pdf",
+      "path": "/apps/bdpan/my-folder/shared-file.pdf",
+      "fsid": "524080722157776",
+      "saved_path": "我的应用数据/bdpan/my-folder/shared-file.pdf",
+      "return_url": "https://pan.baidu.com/union/spirit/launch?...",
+      "return_target_type": "directory",
+      "client_return_target_type": "file",
+      "return_hint": "点击查看",
+      "size": 47104,
+      "is_dir": false
+    }
+  ]
 }
 ```
+
+`transfer` 完成后返回 `count` 和 `files`；顶层 `saved_path` 是共同目标目录，逐项回复必须使用 `files[].saved_path`。兼容旧版结果中的 `files[].path` 或 `remote_path`。选择性转存 `transfer select` 使用单独的 `status=submitted` 响应，该状态只表示任务已提交，不得表述为已保存。
 
 ### search 命令输出
 
@@ -606,15 +752,20 @@ PATH 配置建议:
   "total": 15,
   "page": 1,
   "page_size": 5,
-  "results": [
+  "items": [
     {
       "fs_id": 524080722157776,
+      "fsid": "524080722157776",
       "path": "我的应用数据/bdpan/report.pdf",
       "server_filename": "report.pdf",
       "size": 1536000,
       "isdir": false,
       "category": 4,
-      "server_mtime": "2026-02-25T15:20:00+08:00"
+      "server_mtime": "2026-02-25T15:20:00+08:00",
+      "return_url": "https://pan.baidu.com/union/spirit/launch?...",
+      "return_target_type": "directory",
+      "client_return_target_type": "file",
+      "return_hint": "点击查看"
     }
   ]
 }
@@ -624,9 +775,14 @@ PATH 配置建议:
 
 ```json
 {
-  "status": "ok"
+  "status": "ok",
+  "return_url": "https://pan.baidu.com/union/spirit/launch?...",
+  "return_target_type": "directory",
+  "return_hint": "点击查看"
 }
 ```
+
+`mv`、`cp`、`rename`、`mkdir` 的链接必须指向操作完成后的实际目标；当前 Web 对文件目标仍以所在目录兜底，其他原有状态字段保持兼容。若 CLI 无法定位目标或生成链接失败，保留成功状态和实际路径，不得填充伪链接。
 
 ---
 
