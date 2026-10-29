@@ -5,7 +5,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/BaiduNetdiskAIBot/bdpan-storage/releases"><img src="https://img.shields.io/badge/version-v1.7.6-blue" alt="Version"></a>
+  <a href="https://github.com/BaiduNetdiskAIBot/bdpan-storage/releases"><img src="https://img.shields.io/badge/version-v1.7.7-blue" alt="Version"></a>
   <a href="./LICENSE"><img src="https://img.shields.io/badge/license-Apache%202.0-green" alt="License"></a>
   <a href="https://pan.baidu.com/apaastobui/developer#/developer/skill"><img src="https://img.shields.io/badge/skill-baidu--netdisk-orange" alt="Skill"></a>
 </p>
@@ -60,6 +60,7 @@ Skill 自动识别意图、执行操作、返回格式化结果。
 
 | 功能 | 说明 | 示例指令 |
 |------|------|---------|
+| **容量查询** | 只读查询账号总容量、已用、剩余和使用率，需要 CLI 支持 `quota` | "我的网盘还剩多少空间？" |
 | **上传** | 上传文件或文件夹到网盘 | "上传 ./data.csv 到网盘" |
 | **下载** | 从网盘下载到本地 | "下载网盘里的 report.pdf" |
 | **分享链接下载** | 通过分享链接 + 提取码下载 | "下载这个网盘分享 https://pan.baidu.com/s/1xxx 提取码 abcd" |

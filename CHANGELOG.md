@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.7.7] - 2026-10-27
+
+### Added
+
+- 单文件上传支持 `--overwrite`；默认保留同名旧文件，覆盖须先在聊天中确认具体目标，不支持目录批量覆盖，结果区分新建、另存和覆盖。
+- 新增网盘容量查询：通过 `bdpan quota --json` 获取账号总容量、已用、剩余空间和使用率；可只读比较明确本地文件大小与剩余空间，不自动上传、清理或购买。
+- 容量查询前检查 CLI 命令支持；旧版本提示由用户决定更新，失败或数据异常不推算容量。
+
+### Fixed
+
+- 普通文件或目录名包含连续点号时不再误判路径穿越，保留真正父目录跳转和授权范围保护。
+
 ## 功能更新
 
 ### Added

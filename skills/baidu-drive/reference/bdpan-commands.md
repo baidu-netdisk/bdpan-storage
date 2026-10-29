@@ -87,12 +87,58 @@ bdpan vip [--json]
 
 ---
 
+### quota - 查询网盘容量
+
+```bash
+bdpan quota --help --no-check-update
+bdpan quota --json --no-check-update
+```
+
+无位置参数；只读查询当前账号整体容量，不是应用目录占用。Agent 实际调用按 [公共参数规则](../SKILL.md#所有命令公共参数agent-必传) 附加 agent/session 参数。命令不存在时只提示用户决定更新，不自动更新；未登录按现有登录脚本流程授权。
+
+成功退出码为 0，JSON 为 `code/data/error` 信封：
+
+```json
+{
+  "code": 0,
+  "data": {
+    "total_bytes": 2199023255552,
+    "used_bytes": 1374389534720,
+    "free_bytes": 824633720832,
+    "usage_ratio": 0.625,
+    "usage_percent": 62.5,
+    "total_display": "2.00 TiB",
+    "used_display": "1.25 TiB",
+    "free_display": "768.00 GiB",
+    "expire": false,
+    "message": "容量查询成功"
+  },
+  "error": ""
+}
+```
+
+以上为脱敏 Fixture，不是真实账号容量。
+
+| 字段 | 说明 |
+|---|---|
+| `total_bytes` / `used_bytes` | 总容量 / 已用容量，整数，单位 B |
+| `free_bytes` | 剩余空间，`max(total_bytes-used_bytes,0)`；服务端原始 `free` 是免费容量，不是剩余，不用于该计算 |
+| `usage_ratio` / `usage_percent` | 已用除以总量 / 百分比；百分比四舍五入至两位，展示时可保留两位小数 |
+| `total_display` / `used_display` / `free_display` | 1024 进制，B/KiB/MiB/GiB/TiB/PiB/EiB |
+| `expire` | true 表示 7 天内有容量到期，不表示全部到期，不自动续费 |
+| `message` | 容量查询状态说明 |
+
+失败时 `code=1`、退出码非零、`error` 说明原因；通常 `data=null`。`total<=0`、缺失/null、负数为异常，不能报告成零容量或0%成功；`used>total` 保留原值、`free_bytes=0` 的异常 data，仍为非零退出，不能当正常结果使用。
+
+用户问是否够上传文件时，在目标明确后只读本地文件大小，与 `free_bytes` 按 B 比较；空间充足只代表容量维度，不保证上传成功，不自动上传、清理或购买。
+
 ## 文件操作命令
 
 ### upload - 上传文件
 
 ```bash
 bdpan upload <local> <remote>
+bdpan upload <local-file> <remote-file> --overwrite --json
 ```
 
 | 参数 | 说明 |
@@ -114,6 +160,11 @@ bdpan upload ./data.tar.gz backup/data.tar.gz
 
 **选项：**
 - `--json` - JSON 格式输出上传结果
+- `--overwrite` - 显式覆盖单个文件，默认不覆盖；上传文件夹时不支持该参数。CLI 无额外交互确认，Agent 必须先在聊天中针对明确目标取得二次确认，规则见 [上传](../SKILL.md#上传)。
+
+默认同名不同内容生成带后缀副本，同内容复用不生成副本。单文件结果 `data.action` 为 `created` / `renamed` / `overwritten` / `unchanged`；`remote_path`、`saved_path` 是实际落点；`requested_path` 是请求目标；`conflict_detected` 表示预检发现同名对象。`verification=metadata` 只验证路径和大小，`content_verified=false`，不表示完整内容校验。失败或结果不确定时非零退出、`code=1`，可能带 `action=unknown`；不得自动重传、先删后传或声称成功。
+
+合法连续点号名称（`xxx..mp4`、`会议...docx`、`a..b/文件.txt`）原样保留；独立父目录段 `..`、编码穿越、根目录外路径继续拒绝。重命名第二参数必须是单个名称，不能包含 `/` 或 `\`。
 
 ### download - 下载文件
 
@@ -807,6 +858,11 @@ Skill/Agent 不判断客户端协议、文件扩展名或 MIME，也不拼接上
     "remote": "report.pdf",
     "remote_path": "report.pdf",
     "saved_path": "我的应用数据/bdpan/report.pdf",
+    "action": "created",
+    "requested_path": "/apps/bdpan/report.pdf",
+    "conflict_detected": false,
+    "verification": "metadata",
+    "content_verified": false,
     "fsid": "524080722157776",
     "return_url": "https://pan.baidu.com/union/spirit/launch?...",
     "return_target_type": "directory",
@@ -1076,7 +1132,7 @@ Skill/Agent 不判断客户端协议、文件扩展名或 MIME，也不拼接上
 - 所有路径相对于应用根目录 `/apps/bdpan/`
 - 支持相对路径: `backup/data.tar.gz`
 - 支持绝对路径: `/apps/bdpan/backup/data.tar.gz`
-- 路径穿越 `..` 会被自动阻止
+- 独立父目录段 `..` 及编码穿越会被自动阻止；普通文件/目录名中的连续点号允许并保留原名
 
 > **⛔ 双向路径映射规则：** 调用 bdpan 命令时，"我的应用数据" 必须转换为 `/apps`；向用户展示路径时，`/apps` 必须转换为 "我的应用数据"。详见 [路径规则](../SKILL.md) 章节。
 

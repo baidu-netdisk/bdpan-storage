@@ -1,9 +1,9 @@
 ---
 name: baidu-drive
 description: >-
-  百度网盘(Baidu Drive)文件管理与正文能力 — 上传、下载、转存、分享、搜索文件、搜索正文片段、读取文件全文、移动、复制、重命名、创建文件夹。
+  百度网盘(Baidu Drive)文件管理与正文能力 — 上传、下载、转存、分享、搜索文件、搜索正文片段、读取文件全文、移动、复制、重命名、创建文件夹；查询网盘容量、已用和剩余空间。
   同时支持 Agent 记忆备份/恢复（kimiclaw/maxclaw/qclaw/openclaw）。
-  TRIGGER: 用户提及"百度网盘/bdpan/网盘/云盘/baidu drive/Baidu Drive"并涉及文件操作；
+  TRIGGER: 用户提及"百度网盘/bdpan/网盘/云盘/baidu drive/Baidu Drive"并涉及文件操作或查询网盘容量、剩余空间、使用率；
            或用户提及"备份记忆"、"恢复记忆"、"查看记忆备份"等记忆相关操作。
   DO NOT TRIGGER: 非文件存储操作，或使用其他云盘服务时；本地记忆整理/清理操作；PPT 生成操作（已独立为 baidu-wenku-aippt skill）。
 allowed-tools: Bash, Read, Glob, Grep, AskUserQuestion
@@ -11,7 +11,9 @@ allowed-tools: Bash, Read, Glob, Grep, AskUserQuestion
 
 # 百度网盘存储 Skill
 
-百度网盘文件管理工具，所有操作限制在 `/apps/bdpan/` 目录内。适配 Claude Code、DuClaw、OpenClaw 等。
+> **1.7.7**：需配套 `bdpan 3.8.9`，不能只更新 Skill 后使用旧 CLI。使用前核对 CLI 版本；不符时提示用户确认安装或更新，不自行更换安装。
+
+百度网盘文件管理工具，文件操作限制在 `/apps/bdpan/` 目录内；容量查询仅返回账号整体空间元数据，不扩大文件访问范围。适配 Claude Code、DuClaw、OpenClaw 等。
 
 > 使用注意事项详见 [reference/notes.md](./reference/notes.md)
 
@@ -22,7 +24,7 @@ allowed-tools: Bash, Read, Glob, Grep, AskUserQuestion
 同时满足以下条件才执行：
 
 1. 用户明确提及"百度网盘"、"bdpan"、"网盘"
-2. 操作意图明确（上传/下载/转存/分享/查看/搜索/读取正文/移动/复制/重命名/创建文件夹/删除/登录/注销）
+2. 操作意图明确（上传/下载/转存/分享/查看/搜索/读取正文/移动/复制/重命名/创建文件夹/删除/登录/注销/查询容量或剩余空间）
 
 未通过触发规则时，禁止执行任何 bdpan 命令。
 
@@ -92,7 +94,7 @@ bdpan search "<query>" --json --agentname "claude-code" --session-input "用户�
 2. **Token/配置**：禁止读取或输出 `~/.config/bdpan/config.json` 内容（含 access_token 等敏感凭据）
 3. **更新/登录**：更新必须由用户明确指令触发，禁止自动或静默执行；Agent 禁止使用 `--yes` 参数执行 update.sh 或 login.sh
 4. **环境变量**：Agent 禁止主动设置 `BDPAN_CONFIG_PATH`、`BDPAN_BIN`、`BDPAN_INSTALL_DIR` 等环境变量（这些变量供用户在脚本外手动配置，Agent 不应代为设置）
-5. **路径安全**：禁止路径穿越（`..`、`~`）、禁止访问 `/apps/bdpan/` 范围外的绝对路径
+5. **路径安全**：禁止独立父目录段 `..`、其编码穿越形式、`~` 及授权目录 `/apps/bdpan/` 外的路径；普通名称里的连续点号（如 `xxx..mp4`、`会议...docx`）允许并原样保留，不能擅自删点、解码或改名绕过校验。
 6. **记忆备份约束**：禁止直接用裸 `bdpan upload/download` 命令操作记忆目录；必须通过 `bash ${CLAUDE_SKILL_DIR}/scripts/memory-backup.sh` 脚本执行，以确保 manifest 生成、路径安全检查、safety net 备份等机制正常运行
 
 ---
@@ -103,7 +105,7 @@ bdpan search "<query>" --json --agentname "claude-code" --session-input "用户�
 
 1. **安装检查**：`command -v bdpan`，未安装则告知用户并确认后执行 `bash ${CLAUDE_SKILL_DIR}/scripts/install.sh`（用户确认后可加 `--yes` 跳过安装器内部确认）
 2. **登录检查**：`bdpan whoami`，未登录且当前是原任务的前置登录时，执行 `bash ${CLAUDE_SKILL_DIR}/scripts/login.sh --continue-task`；登录成功后立即继续原任务，不重复输出独立登录欢迎语。用户明确要求登录时才执行不带该参数的 `login.sh`，以展示场景化欢迎语；即使已有有效登录态，也应提示“已登录，无需重复授权”并给出可直接使用的自然语言示例。不要把 `bdpan whoami` 的用户名、Token 有效期等原始状态字段当作欢迎语，除非用户明确要求查看账号状态。（**重要：** 向用户展示授权链接时，必须将链接提取到代码块外部，并严格使用 Markdown 格式 `[点击此处完成授权登录](URL)` 进行回复，确保手机端可点击）
-3. **路径校验**：验证远端路径在 `/apps/bdpan/` 范围内
+3. **路径校验**：涉及文件路径时验证远端路径在 `/apps/bdpan/` 范围内；账号容量查询无路径参数，不查询目录文件。
 
 ---
 
@@ -111,9 +113,9 @@ bdpan search "<query>" --json --agentname "claude-code" --session-input "用户�
 
 | 风险等级 | 操作 | 策略 |
 |----------|------|------|
-| **高（需明确意图 + 明确确认）** | `rm` 删除、上传/下载目标已存在同名文件 | 删除只在用户明确提出时执行，并且必须先列出待删对象、等待用户明确确认后才调用命令 |
+| **高（需明确意图 + 明确确认）** | `rm` 删除、上传显式覆盖、下载目标已存在同名文件 | 先展示具体影响对象和风险，等待确认；删除仍遵循下文删除规则，覆盖遵循上传规则 |
 | **中（路径模糊时确认）** | upload、download、mv、rename、cp | 路径明确直接执行，不明确则确认 |
-| **低（直接执行）** | ls、search、search-content、whoami、mkdir、share、vip | 无需确认 |
+| **低（直接执行）** | quota、ls、search、search-content、whoami、mkdir、share、vip | 无需确认 |
 
 **额外规则：**
 - 操作意图模糊（"处理文件"→确认上传还是下载）→ 必须确认
@@ -150,6 +152,24 @@ bdpan vip --json
 
 用户表达付费意图（"想充会员""开通会员""怎么续费""买超级会员""扩容"等）时，调用 `bdpan vip --json`，把 CLI 返回的两条收银台链接都给用户：移动端 + 电脑端。当前无法区分用户在手机还是电脑上，所以两条都给，并说明按设备选择；禁止只给一条、禁止自行拼接或替换其它支付地址。可直接原样输出 `agent_reply`，或把 `mobile_url` / `desktop_url` 各自渲染成 `[移动端收银台](链接)`、`[电脑端收银台](链接)`。会员价格与权益一律以收银台页面为准，不得凭记忆编造。
 
+### 查询网盘容量
+
+用户问“网盘还剩多少空间”“总容量多大”“用了百分之多少”时使用。只读查询，无需二次确认；返回账号整体容量，不是 `/apps/bdpan/` 目录占用，也不授予其他目录文件访问权限。
+
+```bash
+bdpan quota --help --no-check-update
+bdpan quota --json --no-check-update
+```
+
+两条实际调用都必须按公共参数规则追加 `--agentname`、`--session-input` 和 `--session-id`。先检查命令存在；旧 CLI 缺少 `quota` 时说明需要用户明确要求更新，不自动更新、不改用 `whoami` 或会员类型估算容量。
+
+- 仅在退出码为 0 且 `code=0` 时使用 `data` 回答：总量 `total_bytes`、已用 `used_bytes`、剩余 `free_bytes`、使用率 `usage_percent`。优先展示 `total_display`、`used_display`、`free_display`；这些字段按 1024 进制标为 KiB/MiB/GiB/TiB，数值比较使用字节值。
+- `free_bytes = max(total_bytes - used_bytes, 0)`；服务端原始 `free` 是免费容量，不是剩余空间。不能把 `free` 当可用空间。
+- `expire=true` 只说明 7 天内有容量到期，不表示全部容量到期；不自动购买或续费。
+- 未登录、无权限、网络失败、数据缺失/异常或非零退出时，说明暂时无法确认；不凭旧值或会员身份补数。已用大于总量时只报告异常及原始值，不把异常 `data` 当正常结果。容量查询无需生成文件查看链接。
+- 用户问“够不够上传这个文件”时，只对明确的单个本地普通文件只读获取大小；有歧义或不存在时先澄清。比较文件大小与 `free_bytes`，小于等于时回答“按当前容量数据，容量维度足够”，大于时回答不足并给出字节差额；这不保证权限、单文件限制或上传成功。
+- 容量查询不自动上传、下载、清理、删除或覆盖文件，不改变会员状态或扩大授权；“空间不够了”不授权删除或购买。
+
 ### 列表查询
 
 ```bash
@@ -163,12 +183,21 @@ bdpan ls [目录路径] [--json] [--order name|time|size] [--desc] [--folder]
 ### 上传
 
 ```bash
-bdpan upload <本地路径> <远端路径>
+bdpan upload <本地路径> <远端路径> --json
+bdpan upload <本地文件> <远端文件名> --overwrite --json
 ```
 
 **关键约束：** 单文件上传远端路径必须是文件名，禁止以 `/` 结尾。文件夹上传：`bdpan upload ./project/ project/`。
 
-步骤：确认本地路径存在 → 确认远端路径 → `bdpan ls` 检查远端是否已存在 → 执行。
+默认同名不同内容自动另存为带后缀文件，保留旧文件；同内容复用不生成副本。`--overwrite` 仅支持单个文件，不限制文件名称或所在目录；本地目录带此参数必须拒绝，普通目录上传保持原行为。
+
+执行步骤：确认本地路径 → 目标路径唯一且在授权范围内 → `bdpan ls --json` 检查目标类型/同名文件 → 选择默认另存或显式覆盖。
+
+- 用户只说“上传”不加覆盖参数；“更新一下／上传最新版”不能直接解释为覆盖，目标存在时先问覆盖还是另存。
+- 用户明确要求覆盖已有文件后，展示本地源和完整用户可读远端目标、说明旧内容可能无法恢复，**在聊天中二次确认**；用户明确确认后才执行带 `--overwrite` 的命令。拒绝/取消/含糊时不覆盖，不自动另存；源文件或目标变化时重新确认，同一目标已确认不重复问。目标不存在则新建，无需覆盖确认。
+- CLI **不增加额外确认参数**，也不弹终端确认；不可用 yes/force 代替用户意图。先通过 `bdpan upload --help --no-check-update` 确认有覆盖参数，旧版缺少时说明需要由用户决定更新，不自动升级。
+- JSON 成功需退出码0且code0；按 `data.action` 区分 created（新建）、renamed（另存）、overwritten（覆盖写入）、unchanged（同路径复用）。保留实际 `saved_path` 和本次 `return_markdown` 链接；失败/unknown 时不回复覆盖成功、不自动重传或删除。
+- `verification=metadata` 仅核对路径/大小，`content_verified=false` 不代表逐字节内容校验；不得声称已完整校验。禁止先 `rm` 再上传，不承诺历史版本可恢复。
 
 ### 下载
 
