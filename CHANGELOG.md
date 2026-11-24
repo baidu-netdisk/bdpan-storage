@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.7.8] - 2026-11-17
+
+> 同步发布文库 Skill（baidu-wenku-aippt-personal）v1.1.1。
+
+### Changed
+
+- 更新网盘与文库登录流程，需要支持统一授权入口的 CLI 3.9.0。Agent 在对话中确认安全说明后，同一条回复展示授权链接和使用示例并结束本轮，不等待扫码、不轮询。
+- 支持本地、远端、跨设备及无图形界面场景；用户网页授权后直接发送下一条需求，CLI 自动领取凭据并执行，无需回复“已授权”。
+- 普通业务、记忆备份/恢复和 PPT 生成由实际业务命令处理授权；待授权时明确提示任务尚未执行，不报空目录或操作完成。
+- 网盘 Skill 更新至 v1.7.8、文库 Skill 更新至 v1.1.1；收到旧版 Skill 升级提示时，经用户确认后使用现有更新脚本升级并重新发起授权。
+
 ## [1.7.7] - 2026-10-27
 
 ### Added

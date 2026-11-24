@@ -5,16 +5,18 @@
 set -e
 
 # bdpan CLI 安装器版本（与 CDN 发布版本保持同步）
-VERSION="3.7.3"
+VERSION="3.8.4"
+MIN_CLI_VERSION="3.9.0"
 CDN_BASE="https://issuecdn.baidupcs.com/issue/netdisk/ai-bdpan/installer/${VERSION}"
 
 # 按平台返回安装器 SHA256 校验值（兼容 bash 3.2+，替代 declare -A）
 get_checksum() {
     case "$1" in
-        darwin-amd64)  echo "f49b3577ecd8b596f21e30b1bb8458a31c7ec644c5c4b64da444cea6bbc089cf" ;;
-        darwin-arm64)  echo "8c3a6d3d427e2661a08adfa1acfce4ce849164ba73b9b60662620f7140f86b40" ;;
-        linux-amd64)   echo "1678837c5ce6978f6491e76b10e344fba2beef6f81eb067c7ecc5668cf38fedb" ;;
-        linux-arm64)   echo "7692f828a1af10289274e6951225fcbe9ad3c0664ebee0b492c410855220c197" ;;
+        darwin-amd64)  echo "cc6b10d4afea9baad77c68dadea6b9e4ecd7f8815cf364ebe6be0e51648e4623" ;;
+        darwin-arm64)  echo "a0c395a83f9abc8f1423c30b21dfae73819376f7b1822d3bd4d3de62392c4c0c" ;;
+        linux-amd64)   echo "02050e9a5ed5c5ddc314bf920c103238a669366a130e3bd43a125d83fdd00548" ;;
+        linux-arm64)   echo "abb39a1f7dc0bf44883bbb30b057e6e65c5db64ffdce7c2ae92dea60a136362a" ;;
+        windows-amd64) echo "194f5174bbb3d9260cc5b7d465c4f98d6b9279e028db136dc1e57cc3bc1f49a0" ;;
         *)             echo "" ;;
     esac
 }
@@ -35,6 +37,26 @@ log_warn() {
 
 log_error() {
     echo -e "${RED}[ERROR]${NC} $1"
+}
+
+# 安装器会获取线上 CLI，安装完成后仍需检查实际版本。
+verify_cli_version() {
+    local cli="$1" version_output
+    version_output=$("$cli" version --no-check-update 2>/dev/null) || {
+        local status=$?
+        log_error "无法读取 bdpan CLI 版本，请检查安装后重试。"
+        return "$status"
+    }
+    version_output=${version_output%%$'\n'*}
+    if [[ ! "$version_output" =~ ([0-9]+)\.([0-9]+)\.([0-9]+) ]]; then
+        log_error "无法识别 bdpan CLI 版本，请安装 bdpan >= ${MIN_CLI_VERSION}。"
+        return 1
+    fi
+    CLI_VERSION="${BASH_REMATCH[0]}"
+    if (( 10#${BASH_REMATCH[1]} < 3 || (10#${BASH_REMATCH[1]} == 3 && 10#${BASH_REMATCH[2]} < 9) )); then
+        log_error "当前 bdpan CLI ${CLI_VERSION} 不支持此登录方式，请升级到 bdpan >= ${MIN_CLI_VERSION} 后重试。"
+        return 1
+    fi
 }
 
 # 检测操作系统
@@ -134,8 +156,8 @@ main() {
         fi
 
         log_info "使用本地 bdpan 工具: $BDPAN_BIN"
-        local current_version=$("$BDPAN_BIN" version 2>/dev/null | head -1 || echo "unknown")
-        log_info "bdpan CLI 版本: ${current_version}"
+        verify_cli_version "$BDPAN_BIN"
+        log_info "bdpan CLI 版本: ${CLI_VERSION}"
         log_info "✓ 配置完成！"
         echo ""
         echo "使用方式:"
@@ -234,12 +256,11 @@ main() {
     # 验证安装
     log_info "验证安装..."
     if command -v bdpan &> /dev/null; then
-        local installed_version=$(bdpan version 2>/dev/null | head -1 || echo "unknown")
-        log_info "✓ bdpan CLI 安装成功！(版本: ${installed_version})"
-
         # 注册到版本管理系统，使 bdpan update 能正常工作
         log_info "注册到版本管理系统..."
         bdpan install --force 2>/dev/null || log_warn "版本注册跳过（不影响使用）"
+        verify_cli_version bdpan
+        log_info "✓ bdpan CLI 安装成功！(版本: ${CLI_VERSION})"
 
         echo ""
 
@@ -263,7 +284,7 @@ main() {
         echo ""
 
         echo "快速开始:"
-        echo "  1. 执行登录: bash scripts/login.sh"
+        echo "  1. 登录：在 Agent 对话中确认安全说明，再打开授权链接；网页授权后直接发送需求（入口：bash scripts/login.sh）"
         echo "  2. 生成 PPT: bdpan aippt \"你的PPT主题描述\""
         echo ""
     else

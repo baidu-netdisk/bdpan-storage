@@ -6,6 +6,7 @@ set -e
 
 # bdpan CLI 安装器版本（与 CDN 发布版本保持同步）
 VERSION="3.8.4"
+MIN_CLI_VERSION="3.9.0"
 CDN_BASE="https://issuecdn.baidupcs.com/issue/netdisk/ai-bdpan/installer/${VERSION}"
 
 # 按平台返回安装器 SHA256 校验值（兼容 bash 3.2+，替代 declare -A）
@@ -41,10 +42,31 @@ log_error() {
 print_install_welcome() {
     echo ""
     echo "百度网盘 Skill 已安装完成。"
-    echo "下一步请完成百度网盘登录："
+    echo "下一步：在 Agent 对话中确认安全说明，再打开最新授权链接；网页授权后直接发送需求。"
+    echo "通过 Agent 使用时，Agent 会展示授权链接及使用示例；查看登录入口："
     echo "  bash \"${CLAUDE_SKILL_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}/scripts/login.sh\""
     echo "登录成功后，即可直接用自然语言管理网盘文件。"
     echo ""
+}
+
+# 安装器会获取线上 CLI，安装完成后仍需检查实际版本。
+verify_cli_version() {
+    local cli="$1" version_output
+    version_output=$("$cli" version --no-check-update 2>/dev/null) || {
+        local status=$?
+        log_error "无法读取 bdpan CLI 版本，请检查安装后重试。"
+        return "$status"
+    }
+    version_output=${version_output%%$'\n'*}
+    if [[ ! "$version_output" =~ ([0-9]+)\.([0-9]+)\.([0-9]+) ]]; then
+        log_error "无法识别 bdpan CLI 版本，请安装 bdpan >= ${MIN_CLI_VERSION}。"
+        return 1
+    fi
+    CLI_VERSION="${BASH_REMATCH[0]}"
+    if (( 10#${BASH_REMATCH[1]} < 3 || (10#${BASH_REMATCH[1]} == 3 && 10#${BASH_REMATCH[2]} < 9) )); then
+        log_error "当前 bdpan CLI ${CLI_VERSION} 不支持此登录方式，请升级到 bdpan >= ${MIN_CLI_VERSION} 后重试。"
+        return 1
+    fi
 }
 
 # 检测操作系统
@@ -144,8 +166,8 @@ main() {
         fi
 
         log_info "使用本地 bdpan 工具: $BDPAN_BIN"
-        local current_version=$("$BDPAN_BIN" version 2>/dev/null | head -1 || echo "unknown")
-        log_info "bdpan CLI 版本: ${current_version}"
+        verify_cli_version "$BDPAN_BIN"
+        log_info "bdpan CLI 版本: ${CLI_VERSION}"
         log_info "✓ 配置完成！"
         echo ""
         print_install_welcome
@@ -242,12 +264,11 @@ main() {
     # 验证安装
     log_info "验证安装..."
     if command -v bdpan &> /dev/null; then
-        local installed_version=$(bdpan version 2>/dev/null | head -1 || echo "unknown")
-        log_info "✓ bdpan CLI 安装成功！(版本: ${installed_version})"
-
         # 注册到版本管理系统，使 bdpan update 能正常工作
         log_info "注册到版本管理系统..."
         bdpan install --force 2>/dev/null || log_warn "版本注册跳过（不影响使用）"
+        verify_cli_version bdpan
+        log_info "✓ bdpan CLI 安装成功！(版本: ${CLI_VERSION})"
 
         echo ""
 

@@ -306,36 +306,19 @@ _bdpan_is_installed() {
   command -v bdpan &>/dev/null
 }
 
-_bdpan_whoami() {
-  local raw
-  raw=$(bdpan whoami --json 2>/dev/null) || { echo "loggedIn=false"; return; }
-  local authenticated
-  authenticated=$(echo "$raw" | node -e "
-    let d = ''; process.stdin.on('data', c => d += c);
-    process.stdin.on('end', () => {
-      try {
-        const obj = JSON.parse(d);
-        process.stdout.write(obj.authenticated === true ? 'true' : 'false');
-      } catch(e) {
-        process.stdout.write(d.includes('已登录') ? 'true' : 'false');
-      }
-    });
-  " 2>/dev/null) || authenticated="false"
-  if [ "$authenticated" = "true" ]; then
-    echo "loggedIn=true"
-  else
-    echo "loggedIn=false"
-  fi
-}
-
 _bdpan_ls() {
   local remote_path="$1"
   local raw
-  raw=$(bdpan ls "$remote_path" --json 2>/dev/null) || return 1
-  echo "$raw" | json_pipe "
-    if (!input) process.exit(0);
-    let d; try { d = JSON.parse(input); } catch(e) { process.exit(0); }
-    if (!Array.isArray(d)) process.exit(0);
+  local status=0
+  raw=$(bdpan ls "$remote_path" --json --no-check-update "${BDPAN_AUTH_ARGS[@]}") || status=$?
+  if [ "$status" -ne 0 ]; then
+    printf '%s\n' "$raw"
+    return "$status"
+  fi
+  local parsed
+  parsed=$(printf '%s\n' "$raw" | json_pipe "
+    let d; try { d = JSON.parse(input); } catch(e) { process.exit(1); }
+    if (!Array.isArray(d)) process.exit(1);
     for (const item of d) {
       const obj = {
         name: item.server_filename,
@@ -344,29 +327,43 @@ _bdpan_ls() {
       };
       process.stdout.write(JSON.stringify(obj) + '\n');
     }
-  "
+  ") || {
+    printf '%s\n' "$raw"
+    return 1
+  }
+  printf '%s\n' "$parsed"
 }
 
 _bdpan_upload() {
   local local_path="$1"
   local remote_path="$2"
-  bdpan upload "$local_path" "$remote_path" 2>&1
+  bdpan upload "$local_path" "$remote_path" "${BDPAN_AUTH_ARGS[@]}" 2>&1
 }
 
 _bdpan_download() {
   local remote_path="$1"
   local local_path="$2"
   if command -v timeout &>/dev/null; then
-    timeout 120 bdpan download "$remote_path" "$local_path" 2>&1
+    timeout 120 bdpan download "$remote_path" "$local_path" "${BDPAN_AUTH_ARGS[@]}" 2>&1
   elif command -v gtimeout &>/dev/null; then
-    gtimeout 120 bdpan download "$remote_path" "$local_path" 2>&1
+    gtimeout 120 bdpan download "$remote_path" "$local_path" "${BDPAN_AUTH_ARGS[@]}" 2>&1
   else
-    bdpan download "$remote_path" "$local_path" 2>&1
+    bdpan download "$remote_path" "$local_path" "${BDPAN_AUTH_ARGS[@]}" 2>&1
   fi
 }
 
+# 成功输出可省略；失败输出必须透传，调用方立即停止，不能继续下一次业务调用。
+_bdpan_quiet() {
+  local output status=0
+  output=$("$@") || status=$?
+  if [ "$status" -ne 0 ]; then
+    printf '%s\n' "$output"
+  fi
+  return "$status"
+}
+
 # ============================================================
-# 前置检查（复用现有 install.sh / login.sh）
+# 前置检查（复用现有 install.sh；授权由实际业务命令处理）
 # ============================================================
 check_prerequisites() {
   # 1. 检查 Node.js
@@ -397,26 +394,15 @@ check_prerequisites() {
     echo "bdpan CLI 安装成功！"
   fi
 
-  # 3. 检查登录状态
-  local whoami_result
-  whoami_result=$(_bdpan_whoami)
-  if [[ "$whoami_result" != loggedIn=true* ]]; then
-    local skill_dir
-    skill_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-    local login_script="${skill_dir}/scripts/login.sh"
-    if [ -f "$login_script" ]; then
-      echo "请先登录百度网盘："
-      # 这是原任务触发的自动登录：登录成功后静默返回，避免重复欢迎语。
-      bash "$login_script" --continue-task
-      if [[ "$(_bdpan_whoami)" != loggedIn=true* ]]; then
-        echo "登录未完成，已停止当前记忆操作。请完成手动授权后重试。" >&2
-        exit 1
-      fi
-    else
-      echo "请先登录百度网盘：bash \${CLAUDE_SKILL_DIR}/scripts/login.sh" >&2
-      exit 1
-    fi
+  # 3. 实际业务携带 Skill 信息，由 CLI 检查授权与版本兼容。
+  local skill_dir skill_version
+  skill_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+  skill_version=$(tr -d '[:space:]' < "$skill_dir/VERSION")
+  if [ -z "$skill_version" ]; then
+    echo "Skill VERSION 为空，请检查安装包。" >&2
+    exit 1
   fi
+  BDPAN_AUTH_ARGS+=(--auth-flow cli --skill-name baidu-drive --skill-version "$skill_version")
 }
 
 # ============================================================
@@ -518,29 +504,19 @@ cmd_backup() {
   echo "开始备份，共 ${total} 个文件..."
 
   local i
-  local failed_files=()
   for ((i = 0; i < total; i++)); do
     local file="${all_files[$i]}"
     local local_file="$tmp_dir/$file"
     local remote_file="$remote_path/$file"
 
-    # 确保远端目录存在（处理 memory/ 子目录）
-    bdpan mkdir "$(dirname "$remote_file")" 2>/dev/null || true
-
-    if ! _bdpan_upload "$local_file" "$remote_file" >/dev/null; then
-      failed_files+=("$file")
-    fi
+    # CLI 的 MkdirIfNotExist 对已有目录返回成功；任何失败均保留并停止。
+    _bdpan_quiet bdpan mkdir "$(dirname "$remote_file")" --json --no-check-update \
+      "${BDPAN_AUTH_ARGS[@]}" || exit $?
+    _bdpan_quiet _bdpan_upload "$local_file" "$remote_file" || exit $?
   done
 
   echo ""
-  if [ ${#failed_files[@]} -gt 0 ]; then
-    echo "备份完成（${#failed_files[@]} 个文件上传失败）"
-    for ff in "${failed_files[@]}"; do
-      echo "  - $ff"
-    done
-  else
-    echo "备份完成"
-  fi
+  echo "备份完成"
   echo "文件数: ${total} 个"
   echo "位置: $(to_user_path "${remote_path}")/"
 }
@@ -560,7 +536,12 @@ cmd_list() {
   local rows=()
   local remote_path="${base_path}/manual/"
   local entries
-  entries=$(_bdpan_ls "$remote_path" 2>/dev/null) || true
+  entries=$(_bdpan_ls "$remote_path") || {
+    local status=$?
+    printf '%s\n' "$entries"
+    echo "备份列表查询未完成，已停止当前操作。" >&2
+    exit "$status"
+  }
 
   if [ -n "$entries" ]; then
     local dirs
@@ -627,7 +608,12 @@ cmd_restore() {
   local all_matches=()
   local remote_path="${base_path}/manual/"
   local entries
-  entries=$(_bdpan_ls "$remote_path" 2>/dev/null) || true
+  entries=$(_bdpan_ls "$remote_path") || {
+    local status=$?
+    printf '%s\n' "$entries"
+    echo "备份列表查询未完成，已停止当前操作。" >&2
+    exit "$status"
+  }
 
   if [ -n "$entries" ]; then
     local dirs
@@ -675,10 +661,7 @@ cmd_restore() {
   # 下载 manifest
   echo "正在获取备份信息..."
   local manifest_tmp="$tmp_dir/manifest.json"
-  _bdpan_download "${backup_remote}manifest.json" "$manifest_tmp" >/dev/null 2>&1 || {
-    echo "无法下载 manifest.json，请检查备份路径是否正确。" >&2
-    exit 1
-  }
+  _bdpan_quiet _bdpan_download "${backup_remote}manifest.json" "$manifest_tmp" || exit $?
 
   read_manifest "$manifest_tmp" || { echo "Invalid manifest" >&2; exit 1; }
 
@@ -731,28 +714,18 @@ cmd_restore() {
   echo "开始恢复，共 ${total} 个文件..."
 
   local i
-  local failed_files=()
   for ((i = 0; i < total; i++)); do
     local file="${MANIFEST_FILES[$i]}"
     local local_tmp="$tmp_dir/$file"
     mkdir -p "$(dirname "$local_tmp")"
-    if ! _bdpan_download "${backup_remote}${file}" "$local_tmp" >/dev/null 2>&1; then
-      failed_files+=("$file")
-    fi
+    _bdpan_quiet _bdpan_download "${backup_remote}${file}" "$local_tmp" || exit $?
   done
 
   # 合并文件到本地
   apply_merge "$tmp_dir"
 
   echo ""
-  if [ ${#failed_files[@]} -gt 0 ]; then
-    echo "恢复完成（${#failed_files[@]} 个文件下载失败）"
-    for ff in "${failed_files[@]}"; do
-      echo "  - $ff"
-    done
-  else
-    echo "恢复完成"
-  fi
+  echo "恢复完成"
   echo "备份来源: $(to_user_path "${backup_remote}")"
   echo "文件数: ${total} 个"
   echo "恢复前备份: $safety_dir"
@@ -762,11 +735,12 @@ cmd_restore() {
 # 帮助信息
 # ============================================================
 usage() {
-  echo "Usage: memory-backup.sh <command> [options]"
+  echo "Usage: memory-backup.sh [--auth-confirmed] <command> [options]"
   echo ""
   echo "Agent 记忆备份/恢复到百度网盘"
   echo "支持的 Agent：kimiclaw、maxclaw、qclaw、openclaw（自动检测）"
   echo ""
+  echo "--auth-confirmed：仅在本会话同一授权流程已确认安全说明时使用。"
   echo "Commands:"
   echo "  backup                    备份当前 Agent 记忆到百度网盘"
   echo "  list                      列出网盘上所有可用的记忆备份"
@@ -784,6 +758,11 @@ usage() {
 # 主入口
 # ============================================================
 main() {
+  BDPAN_AUTH_ARGS=()
+  if [ "${1:-}" = --auth-confirmed ]; then
+    BDPAN_AUTH_ARGS+=(--auth-confirmed)
+    shift
+  fi
   if [ $# -eq 0 ]; then
     usage
     exit 0

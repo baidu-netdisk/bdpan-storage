@@ -1,183 +1,90 @@
 #!/bin/bash
-# bdpan OOB 登录脚本（百度文库 AI PPT Skill）
-# 用于非 GUI 环境下的手动授权登录
+# 非交互准备凭据；需要网页授权时返回 JSON 并退出，供 Agent 展示。
+set -eu
 
-set -e
-
-# 颜色输出
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-BLUE='\033[0;34m'
-NC='\033[0m' # No Color
-
-# 解析参数
-SKIP_CONFIRM="no"
+CONFIRMED=no
+CONTINUE_TASK=no
 while [[ $# -gt 0 ]]; do
-    case $1 in
-        --yes|-y)
-            SKIP_CONFIRM="yes"
-            shift
-            ;;
+    case "$1" in
+        --confirmed) CONFIRMED=yes ;;
+        --continue-task|--quiet|--no-welcome) CONTINUE_TASK=yes ;;
         --help|-h)
-            echo "用法: $0 [选项]"
-            echo ""
-            echo "选项:"
-            echo "  --yes, -y    跳过安全确认（自动化场景）"
-            echo "  --help       显示帮助信息"
+            printf '%s\n' "用法: $0 [--confirmed] [--continue-task]" \
+                '默认仅复用凭据或单次领取；需新链接时返回 confirmation_required。' \
+                '--confirmed：Agent 已取得本会话、同一授权流程的安全确认。' \
+                '--continue-task：仅成功时静默；授权状态与错误始终保留。' \
+                '不等待终端输入，不轮询；旧 --yes 不代表本次授权确认。'
             exit 0
             ;;
         *)
-            shift
+            printf '%s\n' '不支持的选项；请使用 --help。旧 --yes 不能代替本会话授权确认。' >&2
+            exit 1
             ;;
     esac
+    shift
 done
 
-log_info() {
-    echo -e "${GREEN}[INFO]${NC} $1"
-}
-
-log_warn() {
-    echo -e "${YELLOW}[WARN]${NC} $1"
-}
-
-log_error() {
-    echo -e "${RED}[ERROR]${NC} $1"
-}
-
-# 检查 bdpan 是否已安装
-if ! command -v bdpan &> /dev/null; then
-    log_error "bdpan 未安装，请先运行: bash scripts/install.sh"
+if ! command -v bdpan >/dev/null 2>&1; then
+    printf '%s\n' '未找到 bdpan，请先按 Skill 安装流程安装。' >&2
     exit 1
 fi
 
-# 检查当前登录状态
-log_info "检查登录状态..."
-
-# 获取 bdpan 版本
-BDPAN_VERSION=$(bdpan version 2>/dev/null | head -1 || echo "unknown")
-
-if bdpan whoami 2>/dev/null | grep -q "已登录"; then
-    log_warn "已经登录，无需重复登录"
-    bdpan whoami
-    exit 0
+# 检查 CLI 是否提供本 Skill 所需的统一授权参数。
+if ! login_help=$(bdpan login --help --no-check-update 2>/dev/null) ||
+    [[ "$login_help" != *--auth-confirmed* || "$login_help" != *--auth-flow* ]]; then
+    printf '%s\n' '当前 CLI 未提供统一授权入口，请确认已安装配套发布包；不会调用旧浏览器登录或自动升级。' >&2
+    exit 1
 fi
 
-log_info "未登录，开始 OOB 授权流程..."
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SKILL_VERSION=$(tr -d '[:space:]' < "$SCRIPT_DIR/../VERSION")
+if [ -z "$SKILL_VERSION" ]; then
+    printf '%s\n' 'Skill VERSION 为空，请检查安装包。' >&2
+    exit 1
+fi
+args=(login --json --no-check-update --skill-name baidu-wenku-aippt-personal
+    --skill-version "$SKILL_VERSION" --auth-flow cli)
+if [ "$CONFIRMED" = yes ]; then
+    args+=(--auth-confirmed)
+fi
 
-# 安全免责声明
-echo ""
-echo -e "${RED}┌──────────────────────────────────────────────────────────────┐${NC}"
-echo -e "${RED}│              ⚠️  百度文库 AI PPT 安全须知 & 免责声明            │${NC}"
-echo -e "${RED}├──────────────────────────────────────────────────────────────┤${NC}"
-echo -e "${RED}│${NC} 1. 请备份网盘重要数据，谨慎操作。                            ${RED}│${NC}"
-echo -e "${RED}│${NC}    请务必【备份】网盘重要数据。                               ${RED}│${NC}"
-echo -e "${RED}│${NC} 2. [行为负责] AI Agent 行为具有不可预测性，请实时             ${RED}│${NC}"
-echo -e "${RED}│${NC}    【人工审核】指令执行过程，对执行后果负责。                  ${RED}│${NC}"
-echo -e "${RED}│${NC} 3. [安全提醒] 严禁在他人、公用或不可信的环境中                ${RED}│${NC}"
-echo -e "${RED}│${NC}    扫码授权，以免网盘数据被窃取！                              ${RED}│${NC}"
-echo -e "${RED}│${NC}    在公共环境使用完毕后，请务必执行                             ${RED}│${NC}"
-echo -e "${RED}│${NC}    【bdpan logout】 彻底清除授权。                             ${RED}│${NC}"
-echo -e "${RED}│${NC} 4. [严禁泄露] 请严格保护配置文件与 Token，                    ${RED}│${NC}"
-echo -e "${RED}│${NC}    切勿在公开仓库或对话中暴露！                                ${RED}│${NC}"
-echo -e "${RED}├──────────────────────────────────────────────────────────────┤${NC}"
-echo -e "${RED}│${NC} 使用本工具即代表您已阅读并认可上述条款。数据安全，人人有责。  ${RED}│${NC}"
-echo -e "${RED}└──────────────────────────────────────────────────────────────┘${NC}"
-echo ""
-
-# 用户确认
-if [ "$SKIP_CONFIRM" = "yes" ]; then
-    log_info "自动模式，跳过安全确认"
-else
-    echo -n -e "${YELLOW}已阅读上述安全须知，确认继续登录? [y/N] ${NC}"
-    read -n 1 -r
-    echo
-    if [[ ! $REPLY =~ ^[Yy]$ ]]; then
-        log_info "已取消登录"
-        exit 0
+# 复用可用 JSON 运行时，不以退出码 0 或文本匹配代替成功协议。
+validate_authenticated() {
+    if command -v python3 >/dev/null 2>&1; then
+        python3 -c 'import json, sys
+try:
+    value = json.load(sys.stdin)
+    valid = (isinstance(value, dict) and type(value.get("code")) is int
+             and value["code"] == 0 and isinstance(value.get("data"), dict)
+             and value["data"].get("status") == "authenticated")
+except (ValueError, TypeError):
+    valid = False
+sys.exit(0 if valid else 1)' 2>/dev/null
+    elif command -v node >/dev/null 2>&1; then
+        node -e 'let input = "";
+process.stdin.on("data", chunk => { input += chunk; });
+process.stdin.on("end", () => {
+    try {
+        const value = JSON.parse(input);
+        const valid = value && value.code === 0 && value.data
+            && value.data.status === "authenticated";
+        process.exit(valid ? 0 : 1);
+    } catch (error) { process.exit(1); }
+});' 2>/dev/null
+    else
+        printf '%s\n' '缺少 python3 或 Node.js，无法核验授权结果；已停止。' >&2
+        return 1
     fi
+}
+
+# stdout 完整保留 CLI JSON；不把授权中断改写为普通失败，不再次领取。
+status=0
+result=$(bdpan "${args[@]}" </dev/null) || status=$?
+if [ "$status" -eq 0 ] && ! printf '%s\n' "$result" | validate_authenticated; then
+    printf '%s\n' 'CLI 未返回有效的登录成功结果，已停止当前操作。' >&2
+    status=1
 fi
-
-# 获取授权链接
-log_info "正在获取授权链接..."
-
-# 检查是否支持 --get-auth-url 参数
-if bdpan login --help 2>/dev/null | grep -q "get-auth-url"; then
-    # 新版本，支持 --get-auth-url
-    AUTH_URL=$(bdpan login --get-auth-url --accept-disclaimer 2>/dev/null || echo "")
-
-    if [ -z "$AUTH_URL" ]; then
-        log_error "获取授权链接失败"
-        exit 1
-    fi
-else
-    # 旧版本，尝试执行 login 捕获输出
-    log_warn "当前版本可能不支持 --get-auth-url，尝试兼容模式..."
-    log_error "当前 bdpan 版本: ${BDPAN_VERSION}"
-    log_error "请升级到支持 --get-auth-url 的 bdpan 版本（>= 3.0.0）"
-    log_error "升级方式: bash scripts/install.sh --force"
-    exit 1
+if [ "$status" -ne 0 ] || [ "$CONTINUE_TASK" != yes ]; then
+    printf '%s\n' "$result"
 fi
-
-# 显示授权链接（支持 OSC 8 终端超链接，可直接点击打开浏览器）
-echo ""
-echo -e "${BLUE}========================================${NC}"
-echo -e "${BLUE}请在浏览器中打开以下链接完成授权:${NC}"
-echo -e "${BLUE}========================================${NC}"
-echo ""
-# OSC 8 超链接格式：\e]8;;URL\e\\显示文本\e]8;;\e\\
-# 支持 iTerm2, VS Code Terminal, Wezterm, GNOME Terminal, Windows Terminal 等
-# 不支持的终端会优雅降级，只显示文本
-echo -e "\033]8;;${AUTH_URL}\033\\${YELLOW}${AUTH_URL}${NC}\033]8;;\033\\"
-echo ""
-echo -e "${BLUE}========================================${NC}"
-echo -e "${YELLOW}提示:${NC}"
-echo -e "${YELLOW}1. 可直接点击上方链接打开浏览器（如终端支持）${NC}"
-echo -e "${YELLOW}2. 链接有效期为 10 分钟${NC}"
-echo -e "${YELLOW}3. 授权成功后，浏览器会显示一个 32 位授权码${NC}"
-echo -e "${YELLOW}4. 请复制授权码并粘贴到下方${NC}"
-echo -e "${BLUE}========================================${NC}"
-echo ""
-
-# 提示用户输入授权码
-echo -n "请输入浏览器中显示的授权码 (32 位十六进制字符): "
-read -r AUTH_CODE
-
-if [ -z "$AUTH_CODE" ]; then
-    log_error "授权码不能为空"
-    exit 1
-fi
-
-# 校验授权码格式：32 位十六进制字符
-if ! echo "$AUTH_CODE" | grep -qE '^[a-fA-F0-9]{32}$'; then
-    log_error "授权码格式不正确（应为 32 位十六进制字符，如: ca0ee3070f75d0246357e5c74d525bda）"
-    log_error "当前输入: ${AUTH_CODE}"
-    log_error "请确认您复制的是完整的授权码"
-    exit 1
-fi
-
-# 使用授权码完成登录
-log_info "正在使用授权码完成登录..."
-
-# 通过 stdin 安全传递授权码，避免在 ps / /proc/PID/cmdline 中泄露
-if bdpan login --help 2>/dev/null | grep -q "set-code-stdin"; then
-    echo "$AUTH_CODE" | bdpan login --set-code-stdin --accept-disclaimer
-else
-    unset AUTH_CODE
-    log_error "当前 bdpan 版本不支持 --set-code-stdin（安全授权码传递）"
-    log_error "当前 bdpan 版本: ${BDPAN_VERSION}"
-    log_error "请升级到 >= 3.6.2: bash scripts/install.sh --force"
-    exit 1
-fi
-
-# 立即清除内存中的授权码
-unset AUTH_CODE
-
-# 验证登录
-if bdpan whoami &> /dev/null; then
-    log_info "✓ 登录成功！"
-    bdpan whoami
-else
-    log_error "登录失败，请检查授权码是否正确"
-    exit 1
-fi
+exit "$status"
