@@ -1,6 +1,6 @@
 # bdpan CLI 命令快速参考
 
-以下命令为简写；Agent 实际调用必须附加 `--agentname`、`--session-input`（本轮原文，shell 单引号包裹）和 `--session-id`（同一对话复用），见 [公共参数规则](../SKILL.md#所有命令公共参数agent-必传)。
+以下命令为简写；Agent 实际调用必须附加 `--agentname`、`--session-input`（本轮原文，shell 单引号包裹；含凭据的整轮省略）和 `--session-id`（同一对话复用），见 [公共参数规则](../SKILL.md#所有命令公共参数agent-必传)。
 
 ## 认证命令
 
@@ -12,7 +12,7 @@
 bash ${CLAUDE_SKILL_DIR}/scripts/login.sh
 ```
 
-脚本内置了安全免责声明和完整的 OOB 授权流程。无论 GUI 或非 GUI 环境，统一使用此脚本。
+脚本非交互返回统一授权 JSON。默认准备凭据；需要新链接时由 Agent 对话确认，再以 `--confirmed` 调用。展示完整链接及指引后结束，支持远端与跨设备。详见[认证指南](./authentication.md)。
 
 ### logout - 注销登录
 
@@ -50,7 +50,7 @@ bdpan whoami
 
 显示当前登录状态、用户名和 Token 有效期信息。
 
-`whoami --json` 包含以下会员字段：
+`whoami` 不领取待授权 key；正文搜索先通过登录脚本准备凭据，再查会员身份。`whoami --json` 顶层 `authenticated` 与 `has_valid_token` 同为 `true` 才表示可复用登录态。`has_valid_token` 表示访问 Token 有效，`expires_at` 与 `token_expires_in` 分别表示其到期时间和剩余有效期；这些字段不表示刷新 Token 的有效期。非零退出或字段异常时停止，不能当作未登录自动授权。另包含以下会员字段：
 
 | 字段 | 类型 | 说明 |
 |------|------|------|
@@ -62,9 +62,8 @@ bdpan whoami
 
 **已登录时输出：**
 ```
-认证状态: 已登录
-用户名: your_username
-Token 有效期至: 2026-04-04 10:30:00
+已登录
+Token: 有效 (29 天)
 ```
 
 **选项：**
@@ -94,7 +93,7 @@ bdpan quota --help --no-check-update
 bdpan quota --json --no-check-update
 ```
 
-无位置参数；只读查询当前账号整体容量，不是应用目录占用。Agent 实际调用按 [公共参数规则](../SKILL.md#所有命令公共参数agent-必传) 附加 agent/session 参数。命令不存在时只提示用户决定更新，不自动更新；未登录按现有登录脚本流程授权。
+无位置参数；只读查询当前账号整体容量，不是应用目录占用。Agent 实际调用按 [公共参数规则](../SKILL.md#所有命令公共参数agent-必传) 附加公共参数。命令不存在时只提示用户决定更新，不自动更新；收到授权状态时按[认证指南](./authentication.md)处理并结束本轮。
 
 成功退出码为 0，JSON 为 `code/data/error` 信封：
 
@@ -1193,7 +1192,7 @@ result = subprocess.run(
 
 | 错误 | 说明 | 解决方案 |
 |------|------|---------|
-| Token expired | Token 过期 | 重新登录 |
+| Token expired | 访问 Token 过期 | 由 CLI 尝试刷新；需要授权时按认证指南展示状态并结束，网络/配置/未识别的刷新错误先排查 |
 | Path not allowed | 路径不在允许范围 | 使用 /apps/bdpan/ 下的路径 |
 | File not found | 文件不存在 | 检查路径是否正确 |
 | errno=13045 | 自己的分享链接 | 文件已在网盘中，直接使用 `bdpan ls` 查找 |
@@ -1251,4 +1250,6 @@ result = subprocess.run(
 | 功能 | macOS | Linux | Windows (WSL) |
 |------|-------|-------|---------------|
 | 基础功能 | ✅ | ✅ | ✅ |
-| WebView 登录 | ✅ | - | -（WSL 无图形界面，使用 OOB 模式） |
+| 登录脚本 | ✅（授权链接） | ✅（含无图形界面） | 用户需能访问授权网页 |
+
+登录入口支持本地、远端和跨设备，不依赖 localhost 回调或原命令持续运行；网页授权后下一次业务请求单次领取凭据。

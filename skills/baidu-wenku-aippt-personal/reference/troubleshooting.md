@@ -6,52 +6,17 @@
 
 ## 认证问题
 
-### Token 过期
+PPT 业务直接使用 `run-aippt.sh`，不额外预登录；用户主动登录才调用登录脚本。`whoami` 只查询状态，不领取待授权 key。
 
-**症状：**
-```
-错误: Token 过期
-Error: Token expired
-```
+授权状态按[认证指南](./authentication.md)处理：需要确认时在普通对话中等待用户同意或取消，返回入口后展示完整链接与说明并结束本轮。支持跨设备；网页授权后直接发下一条业务需求。
 
-**解决方案：**
-```bash
-bdpan logout
-bash ${CLAUDE_SKILL_DIR}/scripts/login.sh
-```
+网络、服务、格式或保存错误按真实原因停止，不当作未登录，不自动 logout、删除配置或反复申请链接。链接过期由下一次请求按 CLI 状态处理，使用最新入口。
 
-> 登录安全约束详见 [SKILL.md](../SKILL.md) 的「安全约束」章节。
+### 提示 Skill 需要升级
 
-### WebView 无法打开
+CLI 明确提示需要升级 Skill 时，百度文库 `baidu-wenku-aippt-personal` 至少需要 **v1.1.1**。向用户说明原因并取得确认后，执行 `bash ${CLAUDE_SKILL_DIR}/scripts/update.sh`。更新后检查该 Skill 的 `VERSION` 满足最低版本且实际包包含统一授权流程，重新加载技能或开启新会话，再重试登录；若仍低于要求，说明更新未满足要求并停止重试。
 
-**症状：** 登录过程中浏览器或 WebView 窗口未出现。
-
-**解决方案：**
-工具会自动降级到 OOB（Out-of-Band）模式，按以下步骤操作：
-
-1. 复制控制台显示的授权链接：
-   ```
-   https://openapi.baidu.com/oauth/...?device_code=xxxxx
-   ```
-
-2. 在浏览器中打开该链接
-
-3. 完成授权后，浏览器会显示授权码
-
-4. 复制授权码并粘贴到命令行提示处
-
-5. 按回车确认
-
-### 授权后登录失败
-
-**症状：** 授权页面完成但登录仍然失败。
-
-**解决方案：**
-```bash
-# 清除配置并重试
-rm ~/.config/bdpan/config.json
-bash ${CLAUDE_SKILL_DIR}/scripts/login.sh
-```
+网络错误或普通 Token 刷新失败不触发技能升级，按 CLI 原始错误排查。
 
 ---
 
@@ -71,10 +36,10 @@ bash ${CLAUDE_SKILL_DIR}/scripts/login.sh
 **症状：** 命令执行后没有返回 PPT 文件路径或显示错误信息。
 
 **解决方案：**
-1. 确认已登录：`bdpan whoami`
+1. 确认登录状态：`bdpan whoami --json --no-check-update`
 2. 检查输入描述是否足够详细（建议超过 10 个字）
 3. 避免输入包含特殊字符（引号需要正确转义）
-4. 如果 Token 过期，重新登录后再试
+4. 如果访问 Token 过期，先由 CLI 尝试刷新；明确提示需要授权时再登录
 
 ### 参数值无效
 
@@ -194,4 +159,4 @@ ls -la ~/.config/bdpan/
 bdpan whoami
 ```
 
-> **⛔ 安全警告：** 切勿使用 `cat` 查看配置文件内容，配置文件中包含 access_token 等敏感凭据，打印到终端或对话中可能导致泄露。
+> **⛔ 安全警告：** 切勿使用 `cat` 查看配置文件内容，配置文件中包含 `access_token`、`refresh_token` 等敏感凭据，打印到终端或对话中可能导致泄露。
