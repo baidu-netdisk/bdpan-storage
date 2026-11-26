@@ -36,26 +36,14 @@ jobs:
       - name: Check for sensitive files
         run: |
           # 检查是否有敏感文件被提交（排除模板文件）
-          SENSITIVE_PATTERNS=(".env" "config.json" "*.pem" "*.key" "credentials*")
-          EXCLUDE_PATTERNS=(".env.example" ".env.template" ".env.sample")
-          FOUND=0
-          for pattern in "${SENSITIVE_PATTERNS[@]}"; do
-            while IFS= read -r file; do
-              [ -z "$file" ] && continue
-              SKIP=0
-              for exclude in "${EXCLUDE_PATTERNS[@]}"; do
-                if [[ "$file" == *"$exclude"* ]]; then
-                  SKIP=1
-                  break
-                fi
-              done
-              if [ "$SKIP" -eq 0 ]; then
-                echo "❌ 发现可能包含敏感信息的文件: $file"
-                FOUND=1
-              fi
-            done < <(git ls-files | grep "$pattern" || true)
-          done
-          if [ "$FOUND" -eq 1 ]; then
+          SENSITIVE_FILES=$(git ls-files -- \
+            ':(glob)**/.env' ':(glob)**/.env.*' ':(glob)**/config.json' \
+            ':(glob)**/*.pem' ':(glob)**/*.key' ':(glob)**/credentials*' \
+            ':(exclude,glob)**/.env.example' \
+            ':(exclude,glob)**/.env.template' \
+            ':(exclude,glob)**/.env.sample')
+          if [ -n "$SENSITIVE_FILES" ]; then
+            printf '❌ 发现可能包含敏感信息的文件:\n%s\n' "$SENSITIVE_FILES"
             echo "请移除敏感文件或将其添加到 .gitignore"
             exit 1
           fi

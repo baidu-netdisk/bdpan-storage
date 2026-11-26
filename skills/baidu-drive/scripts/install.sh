@@ -181,6 +181,24 @@ main() {
 
     log_info "检测到平台: ${os}/${arch}"
 
+    local platform_key="${os}-${arch}"
+    local expected_checksum
+    expected_checksum="$(get_checksum "$platform_key")"
+    if [ -z "$expected_checksum" ]; then
+        log_error "当前平台 ${platform_key} 无预置 SHA256 校验值，无法安全安装。"
+        exit 1
+    fi
+
+    local -a checksum_command
+    if command -v sha256sum &> /dev/null; then
+        checksum_command=(sha256sum)
+    elif command -v shasum &> /dev/null; then
+        checksum_command=(shasum -a 256)
+    else
+        log_error "未找到 sha256sum 或 shasum，请安装校验工具后重试。"
+        exit 1
+    fi
+
     # 检查是否已安装
     if command -v bdpan &> /dev/null; then
         local current_version=$(bdpan version 2>/dev/null | head -1 || echo "unknown")
@@ -220,43 +238,31 @@ main() {
         exit 1
     fi
 
-    # 添加执行权限（非 Windows）
-    if [ "$os" != "windows" ]; then
-        chmod +x "${installer_name}"
-    fi
-
     log_info "安装器下载完成，正在校验完整性..."
 
     # SHA256 完整性校验
-    local platform_key="${os}-${arch}"
-    local expected_checksum
-    expected_checksum="$(get_checksum "$platform_key")"
-    if [ -n "$expected_checksum" ]; then
-        local actual_checksum=""
-        if command -v sha256sum &> /dev/null; then
-            actual_checksum=$(sha256sum "${installer_name}" | awk '{print $1}')
-        elif command -v shasum &> /dev/null; then
-            actual_checksum=$(shasum -a 256 "${installer_name}" | awk '{print $1}')
-        else
-            log_warn "未找到 sha256sum/shasum 工具，跳过完整性校验"
-        fi
-
-        if [ -n "$actual_checksum" ]; then
-            if [ "$actual_checksum" != "$expected_checksum" ]; then
-                log_error "SHA256 校验失败！文件可能被篡改"
-                log_error "  期望: ${expected_checksum}"
-                log_error "  实际: ${actual_checksum}"
-                rm -f "${installer_name}"
-                exit 1
-            fi
-            log_info "SHA256 校验通过"
-        fi
+    local actual_checksum
+    if actual_checksum=$("${checksum_command[@]}" "${installer_name}"); then
+        actual_checksum=${actual_checksum%%[[:space:]]*}
     else
-        log_warn "当前平台 ${platform_key} 无预置校验值，跳过完整性校验"
+        log_error "无法计算安装器的 SHA256 校验值。"
+        rm -f "${installer_name}"
+        exit 1
     fi
+    if [ "$actual_checksum" != "$expected_checksum" ]; then
+        log_error "SHA256 校验失败！文件可能被篡改"
+        log_error "  期望: ${expected_checksum}"
+        log_error "  实际: ${actual_checksum}"
+        rm -f "${installer_name}"
+        exit 1
+    fi
+    log_info "SHA256 校验通过"
 
     # 执行安装器（非交互模式）
-    ./${installer_name} --yes
+    if [ "$os" != "windows" ]; then
+        chmod +x "${installer_name}"
+    fi
+    "./${installer_name}" --yes
 
     # 清理安装器
     rm -f "${installer_name}"
