@@ -236,7 +236,7 @@ Agent 的 Bash 工具有执行超时限制，大文件下载可能因超时而�
 | 文件大小 | 策略 | 执行方式 |
 |----------|------|---------|
 | ≤ 50MB | 直接下载 | `bdpan download <远端路径> <本地路径>`，Bash timeout 设为 300000（5 分钟） |
-| > 50MB | 后台下载 | 使用 `nohup` 后台执行，Agent 轮询进度 |
+| > 50MB | 后台下载 | 使用 `nohup` 后台执行，记录日志和退出码，Agent 轮询进度 |
 
 **小文件（≤ 50MB）直接下载：**
 
@@ -245,26 +245,23 @@ Agent 的 Bash 工具有执行超时限制，大文件下载可能因超时而�
 **大文件（> 50MB）后台下载流程：**
 
 ```bash
-# 1. 启动后台下载（nohup + 进度日志）
-nohup bdpan download <远端路径> <本地路径> > /tmp/bdpan-dl-$$.log 2>&1 & echo $!
+# 启动后台下载，按公共参数和登录确认规则补齐本次调用的参数。
+download_dir=$(mktemp -d "${TMPDIR:-/tmp}/bdpan-download.XXXXXX") || exit 1
+nohup bash -c '
+  status_file=$1
+  shift
+  result=0
+  bdpan "$@" || result=$?
+  printf "%s\n" "$result" > "$status_file"
+  exit "$result"
+' bash "$download_dir/status" download '<远端路径>' '<本地路径>' --json \
+  > "$download_dir/download.log" 2>&1 &
+printf 'PID=%s\n任务目录=%s\n' "$!" "$download_dir"
 ```
 
-```bash
-# 2. 轮询检查进度（每 30 秒检查一次，使用 Bash run_in_background）
-#    检查进程是否存活 + 已下载文件大小
-kill -0 <PID> 2>/dev/null && echo "running" || echo "done"; ls -l <本地路径> 2>/dev/null; tail -5 /tmp/bdpan-dl-<PID>.log 2>/dev/null
-```
+Agent 应保存返回的 PID 和任务目录。启动后告知用户文件大小，每隔 30 秒用 `kill -0` 和本地文件大小检查进度。进程结束后读取该任务目录的 `status` 和 `download.log`，按 CLI 结果判断是否完成；缺少退出记录时报告结果未确认，若返回待授权状态则按认证流程处理。
 
-```bash
-# 3. 下载完成后清理日志
-rm -f /tmp/bdpan-dl-<PID>.log
-```
-
-Agent 执行大文件后台下载时的行为规范：
-- 启动后台下载后，**立即告知用户**：下载已在后台启动，文件大小 X，预计需要 Y 时间
-- 每次轮询后向用户报告进度（已下载大小 / 总大小、百分比）
-- 下载完成后告知用户最终结果
-- 如果进程异常退出，检查日志并报告错误原因
+如果 CLI 自身返回 `context deadline exceeded`，后台运行无法解决该超时。向用户说明失败原因，并提示可以在百度网盘官方客户端手动下载原文件。不要为下载自动创建分享链接。
 
 **分享链接下载（先转存再下载到本地）：**
 
@@ -288,6 +285,8 @@ bdpan transfer "https://pan.baidu.com/s/<分享标识>" [-p 提取码] [-d 目�
 步骤：确认用户提供的是百度网盘分享链接 → 如果链接含 `?pwd=` 或用户明确提供提取码则保留该提取码，否则不要求用户补充 → 确认目标目录 → 执行。转存成功后只展示本次转存的文件（非整个目录），逐项回显 CLI 返回的实际完整保存路径，不得只展示目标目录。
 
 分享链接中的内部标识和前缀属于 CLI 解析规则，Skill 只需原样传入用户提供的链接，不在回复中拆解、比较或引导用户选择前缀。
+
+Agent 调用 `transfer`、`transfer list` 或 `transfer select` 时使用 `--json`。先按认证流程处理待授权状态，再结合进程退出码和 JSON 结果判断。即使进程退出码为 0，`code` 非零也应按错误处理。收到分享验证 `HTTP 406` 时停止当前遍历或转存，保留脱敏错误 ID，参见[分享验证故障排除](./reference/troubleshooting.md#分享验证返回-http-406)。
 
 **异步转存状态：**
 
